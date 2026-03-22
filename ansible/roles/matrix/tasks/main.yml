@@ -1,0 +1,330 @@
+---
+# ── Directories ──────────────────────────────────────────────────────────────
+
+- name: Create matrix project directory
+  ansible.builtin.file:
+    path: "{{ matrix_project_dir }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+
+- name: Create subdirectories
+  ansible.builtin.file:
+    path: "{{ matrix_project_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  loop:
+    - coturn
+    - livekit
+    - nginx/data
+    - nginx/letsencrypt
+    - synapse-data
+
+# ── Config files ─────────────────────────────────────────────────────────────
+
+- name: Deploy docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ matrix_project_dir }}/docker-compose.yml"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0640"
+
+- name: Deploy coturn configuration
+  ansible.builtin.template:
+    src: turnserver.conf.j2
+    dest: "{{ matrix_project_dir }}/coturn/turnserver.conf"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0640"
+
+- name: Deploy LiveKit configuration
+  ansible.builtin.template:
+    src: livekit.yaml.j2
+    dest: "{{ matrix_project_dir }}/livekit/livekit.yaml"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0640"
+
+# ── Synapse config generation ─────────────────────────────────────────────────
+
+- name: Generate Synapse homeserver config (if not already present)
+  ansible.builtin.command:
+    cmd: >
+      docker run --rm
+      -v {{ matrix_project_dir }}/synapse-data:/data
+      -e SYNAPSE_SERVER_NAME={{ matrix_domain }}
+      -e SYNAPSE_REPORT_STATS=yes
+      matrixdotorg/synapse:latest generate
+    creates: "{{ matrix_project_dir }}/synapse-data/homeserver.yaml"
+  become_user: "{{ deploy_user }}"
+
+- name: Fix synapse-data ownership after Docker generation
+  ansible.builtin.file:
+    path: "{{ matrix_project_dir }}/synapse-data"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    recurse: true
+
+- name: Deploy Synapse homeserver.yaml
+  ansible.builtin.template:
+    src: homeserver.yaml.j2
+    dest: "{{ matrix_project_dir }}/synapse-data/homeserver.yaml"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0640"
+
+# ── Helper scripts ────────────────────────────────────────────────────────────
+
+- name: Deploy create-admin script
+  ansible.builtin.template:
+    src: create-admin.sh.j2
+    dest: "{{ matrix_project_dir }}/create-admin.sh"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0750"
+
+# ── Stack startup ─────────────────────────────────────────────────────────────
+
+- name: Start Matrix stack with docker compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ matrix_project_dir }}"
+    state: present
+    pull: always
+  become_user: "{{ deploy_user }}"
+
+- name: Wait for Synapse to become healthy
+  ansible.builtin.uri:
+    url: "http://localhost:8008/_matrix/client/versions"
+    status_code: 200
+  register: synapse_health
+  retries: 20
+  delay: 10
+  until: synapse_health.status == 200
+
+# ── Matrix admin user ─────────────────────────────────────────────────────────
+
+- name: Create Matrix admin user
+  ansible.builtin.command:
+    cmd: >
+      docker exec matrix-synapse-1
+      register_new_matrix_user
+      -c /data/homeserver.yaml
+      http://localhost:8008
+      --admin
+      -u {{ matrix_admin_user }}
+      -p {{ matrix_admin_password }}
+  become_user: "{{ deploy_user }}"
+  register: admin_create_result
+  failed_when:
+    - admin_create_result.rc != 0
+    - "'User ID already taken' not in admin_create_result.stderr"
+  changed_when: admin_create_result.rc == 0
+
+# ── Nginx Proxy Manager — automated API setup ─────────────────────────────────
+
+- name: Wait for Nginx Proxy Manager to be ready
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/"
+    status_code: 200
+  register: npm_ready
+  retries: 20
+  delay: 10
+  until: npm_ready.status == 200
+
+- name: Authenticate with NPM default credentials
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/tokens"
+    method: POST
+    body_format: json
+    body:
+      identity: "admin@example.com"
+      secret: "changeme"
+    status_code: [200, 201]
+  register: npm_default_token
+  ignore_errors: true
+
+- name: Authenticate with NPM custom credentials (if already changed)
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/tokens"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ npm_admin_email }}"
+      secret: "{{ npm_admin_password }}"
+    status_code: [200, 201]
+  register: npm_custom_token
+  when: npm_default_token is failed or npm_default_token.status not in [200, 201]
+
+- name: Set NPM auth token fact
+  ansible.builtin.set_fact:
+    npm_token: >-
+      {{
+        (npm_default_token.json.token
+         if (npm_default_token is not failed and npm_default_token.status in [200, 201])
+         else npm_custom_token.json.token)
+      }}
+
+- name: Get NPM current admin user id
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/users"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+    status_code: 200
+  register: npm_users
+
+- name: Set NPM admin user id fact
+  ansible.builtin.set_fact:
+    npm_admin_id: "{{ npm_users.json[0].id }}"
+
+- name: Update NPM admin email and name
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/users/{{ npm_admin_id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+    body_format: json
+    body:
+      name: "Administrator"
+      nickname: "admin"
+      email: "{{ npm_admin_email }}"
+      roles:
+        - admin
+    status_code: 200
+  when: npm_default_token is not failed and npm_default_token.status in [200, 201]
+
+- name: Update NPM admin password
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/users/{{ npm_admin_id }}/auth"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+    body_format: json
+    body:
+      type: password
+      current: "changeme"
+      secret: "{{ npm_admin_password }}"
+    status_code: 200
+  when: npm_default_token is not failed and npm_default_token.status in [200, 201]
+
+- name: Re-authenticate with new NPM credentials after password change
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/tokens"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ npm_admin_email }}"
+      secret: "{{ npm_admin_password }}"
+    status_code: [200, 201]
+  register: npm_new_token
+  when: npm_default_token is not failed and npm_default_token.status in [200, 201]
+
+- name: Refresh NPM token fact after credential update
+  ansible.builtin.set_fact:
+    npm_token: "{{ npm_new_token.json.token }}"
+  when: npm_new_token is not skipped and npm_new_token is not failed
+
+- name: Create NPM proxy host for Synapse (matrix.domain)
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/nginx/proxy-hosts"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+    body_format: json
+    body:
+      domain_names:
+        - "{{ matrix_domain }}"
+      forward_scheme: http
+      forward_host: synapse
+      forward_port: 8008
+      allow_websocket_upgrade: true
+      block_exploits: true
+      ssl_forced: true
+      http2_support: true
+      hsts_enabled: true
+      hsts_subdomains: false
+      certificate_id: "new"
+      meta:
+        letsencrypt_agree: true
+        letsencrypt_email: "{{ letsencrypt_email }}"
+        dns_challenge: false
+      advanced_config: |
+        location /.well-known/matrix/client {
+            add_header Access-Control-Allow-Origin '*';
+            add_header Content-Type application/json;
+            return 200 '{"m.homeserver":{"base_url":"https://{{ matrix_domain }}"},"org.matrix.msc4143.rtc_foci":[{"type":"livekit","livekit_service_url":"https://{{ call_auth_domain }}"}]}';
+        }
+        location /.well-known/matrix/server {
+            add_header Access-Control-Allow-Origin '*';
+            add_header Content-Type application/json;
+            return 200 '{"m.server":"{{ matrix_domain }}:443"}';
+        }
+    status_code: [200, 201]
+  register: npm_synapse_host
+  failed_when:
+    - npm_synapse_host.status not in [200, 201]
+    - "'already exists' not in (npm_synapse_host.json.error.message | default(''))"
+
+- name: Create NPM proxy host for LiveKit (livekit.domain)
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/nginx/proxy-hosts"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+    body_format: json
+    body:
+      domain_names:
+        - "{{ livekit_domain }}"
+      forward_scheme: http
+      forward_host: "{{ server_public_ip }}"
+      forward_port: 7880
+      allow_websocket_upgrade: true
+      block_exploits: true
+      ssl_forced: true
+      http2_support: true
+      hsts_enabled: true
+      hsts_subdomains: false
+      certificate_id: "new"
+      meta:
+        letsencrypt_agree: true
+        letsencrypt_email: "{{ letsencrypt_email }}"
+        dns_challenge: false
+    status_code: [200, 201]
+  register: npm_livekit_host
+  failed_when:
+    - npm_livekit_host.status not in [200, 201]
+    - "'already exists' not in (npm_livekit_host.json.error.message | default(''))"
+
+- name: Create NPM proxy host for lk-jwt-service (call-auth.domain)
+  ansible.builtin.uri:
+    url: "http://localhost:81/api/nginx/proxy-hosts"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ npm_token }}"
+    body_format: json
+    body:
+      domain_names:
+        - "{{ call_auth_domain }}"
+      forward_scheme: http
+      forward_host: "{{ server_public_ip }}"
+      forward_port: 8081
+      allow_websocket_upgrade: true
+      block_exploits: true
+      ssl_forced: true
+      http2_support: true
+      hsts_enabled: true
+      hsts_subdomains: false
+      certificate_id: "new"
+      meta:
+        letsencrypt_agree: true
+        letsencrypt_email: "{{ letsencrypt_email }}"
+        dns_challenge: false
+    status_code: [200, 201]
+  register: npm_callauth_host
+  failed_when:
+    - npm_callauth_host.status not in [200, 201]
+    - "'already exists' not in (npm_callauth_host.json.error.message | default(''))"

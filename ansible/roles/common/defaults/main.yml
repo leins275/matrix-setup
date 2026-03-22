@@ -1,4 +1,0 @@
----
-deploy_user: usr
-matrix_project_dir: "/home/usr/matrix"
-ssh_allowed_from: "any"

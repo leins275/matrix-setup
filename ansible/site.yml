@@ -1,7 +1,9 @@
 ---
 - name: Deploy Matrix Synapse stack
-  hosts: matrix_servers
+  hosts: matrix
   become: true
+  vars_files:
+    - vars.yml
 
   roles:
     - role: common

@@ -1,0 +1,50 @@
+server_name: "{{ matrix_domain }}"
+pid_file: /data/homeserver.pid
+
+listeners:
+  - port: 8008
+    resources:
+      - compress: false
+        names:
+          - client
+          - federation
+    tls: false
+    type: http
+    x_forwarded: true
+
+database:
+  name: psycopg2
+  args:
+    user: synapse
+    password: {{ db_password }}
+    database: synapse
+    host: db
+    cp_min: 5
+    cp_max: 10
+
+log_config: "/data/{{ matrix_domain }}.log.config"
+media_store_path: /data/media_store
+
+registration_shared_secret: "{{ lookup('password', '/dev/null length=48 chars=ascii_letters,digits') }}"
+macaroon_secret_key: "{{ lookup('password', '/dev/null length=48 chars=ascii_letters,digits') }}"
+form_secret: "{{ lookup('password', '/dev/null length=48 chars=ascii_letters,digits') }}"
+
+signing_key_path: "/data/{{ matrix_domain }}.signing.key"
+
+report_stats: true
+
+trusted_key_servers:
+  - server_name: "matrix.org"
+
+# Legacy 1:1 Calling (Coturn)
+turn_uris:
+  - "turn:{{ matrix_domain }}:3478?transport=udp"
+  - "turn:{{ matrix_domain }}:3478?transport=tcp"
+turn_shared_secret: "{{ coturn_secret }}"
+turn_allow_guests: true
+
+# Modern Element Call / MatrixRTC (LiveKit)
+experimental_features:
+  msc3266_enabled: true
+  msc4222_enabled: true
+max_event_delay_duration: 24h

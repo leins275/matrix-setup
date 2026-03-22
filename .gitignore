@@ -1,16 +1,9 @@
-# Ansible secrets and host-specific vars (never commit real values)
-ansible/host_vars/*.yml
-!ansible/host_vars/*.yml.example
+# Reference export folder — not part of the deployable setup
+matrix/
+!ansible/roles/matrix
 
-# Synapse signing key and secrets
-matrix/synapse-data/*.signing.key
-matrix/.env
-
-# Docker persistent volumes
-matrix/postgresdata/
-matrix/nginx/data/
-matrix/nginx/letsencrypt/
-matrix/synapse-data/media_store/
+# vars.yml contains secrets — never commit with real values filled in
+ansible/vars.yml
 
 # Ansible retry files
 *.retry
@@ -25,5 +18,3 @@ __pycache__/
 .idea/
 *.swp
 *.swo
-
-matrix/

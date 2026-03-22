@@ -10,6 +10,8 @@ A fully automated, reproducible deployment of a **Matrix Synapse** homeserver wi
 - [Synapse Admin](https://github.com/Awesome-Technologies/synapse-admin) — web admin UI
 - [Nginx Proxy Manager](https://nginxproxymanager.com/) — reverse proxy + automatic SSL
 
+After completing the two manual steps (server creation and DNS), run `make install && make run` and the playbook handles everything else: system hardening, Docker installation, all config generation, stack startup, Matrix admin user creation, and full Nginx Proxy Manager configuration including SSL certificates.
+
 ---
 
 ## Table of Contents
@@ -19,20 +21,17 @@ A fully automated, reproducible deployment of a **Matrix Synapse** homeserver wi
 3. [Part 1 — Manual Steps (Server & DNS)](#part-1--manual-steps-server--dns)
    - [Step 1: Create a VPS](#step-1-create-a-vps)
    - [Step 2: Configure DNS Records](#step-2-configure-dns-records)
-   - [Step 3: Prepare Your Local Machine](#step-3-prepare-your-local-machine)
 4. [Part 2 — Automated Setup with Ansible](#part-2--automated-setup-with-ansible)
+   - [Step 3: Prepare Your Local Machine](#step-3-prepare-your-local-machine)
    - [Step 4: Clone This Repository](#step-4-clone-this-repository)
    - [Step 5: Generate Secrets](#step-5-generate-secrets)
    - [Step 6: Configure Variables](#step-6-configure-variables)
    - [Step 7: Run the Playbook](#step-7-run-the-playbook)
-5. [Part 3 — Post-Deploy: Configure Nginx Proxy Manager](#part-3--post-deploy-configure-nginx-proxy-manager)
-   - [Step 8: Log In and Create Proxy Hosts](#step-8-log-in-and-create-proxy-hosts)
-   - [Step 9: Add .well-known for LiveKit Discovery](#step-9-add-well-known-for-livekit-discovery)
-6. [Verification](#verification)
-7. [Port Reference](#port-reference)
-8. [Directory Layout on Server](#directory-layout-on-server)
-9. [Useful Commands](#useful-commands)
-10. [Troubleshooting](#troubleshooting)
+5. [Verification](#verification)
+6. [Port Reference](#port-reference)
+7. [Directory Layout on Server](#directory-layout-on-server)
+8. [Useful Commands](#useful-commands)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -42,7 +41,7 @@ A fully automated, reproducible deployment of a **Matrix Synapse** homeserver wi
                     Internet
                        │
               ┌────────▼────────┐
-              │  Nginx Proxy    │  :80 / :443
+              │  Nginx Proxy    │  :80 / :443  (auto SSL via Let's Encrypt)
               │  Manager        │  :81  (admin UI)
               └──┬──────────┬───┘
                  │          │
@@ -69,50 +68,39 @@ A fully automated, reproducible deployment of a **Matrix Synapse** homeserver wi
 
 ## Prerequisites
 
-### On your local machine
+### Local machine
 
 - Python 3.10+
 - `make`
-- `ansible` and `ansible-galaxy`
+- `ansible` — install with `pip install ansible`
 - An SSH key pair (`~/.ssh/id_ed25519` recommended)
 
-Install Ansible:
+### Server
 
-```bash
-pip install ansible
-```
-
-### Server requirements
-
-- Ubuntu 22.04 LTS (recommended) or 24.04 LTS
+- Ubuntu 22.04 LTS or 24.04 LTS
 - Minimum 2 vCPU, 2 GB RAM, 20 GB SSD
 - A public IPv4 address
-- Root SSH access to the fresh server (for the initial run)
+- Root SSH access on the fresh server
 
 ---
 
 ## Part 1 — Manual Steps (Server & DNS)
 
-These steps must be done **before** running Ansible.
+These two steps must be done **before** running Ansible, as they require external services.
 
 ### Step 1: Create a VPS
 
-Create a fresh Ubuntu 22.04 server with your preferred provider:
+Create a fresh Ubuntu 22.04 server at your preferred provider (Hetzner, DigitalOcean, Vultr, Linode, etc.).
 
-| Provider | Notes |
-|---|---|
-| DigitalOcean | Droplets → Ubuntu 22.04 |
-| Hetzner | Cloud → Ubuntu 22.04 |
-| Vultr | Cloud Compute → Ubuntu 22.04 |
-| Linode/Akamai | Linodes → Ubuntu 22.04 |
+**During creation:** add your SSH public key so you can connect as root.
 
-**Important — Cloud firewall / Security Groups:**  
-Many providers have a network-level firewall *in addition* to UFW. You must open the following ports in their dashboard too:
+**Cloud firewall / Security Groups:**  
+Many providers have a network-level firewall separate from UFW. If yours does, open these ports in the provider dashboard:
 
 | Port(s) | Protocol | Purpose |
 |---|---|---|
 | 22 | TCP | SSH |
-| 80, 443 | TCP | HTTP/HTTPS |
+| 80, 443 | TCP | HTTP / HTTPS |
 | 81 | TCP | Nginx Proxy Manager admin |
 | 8080 | TCP | Synapse Admin UI |
 | 3478, 5349 | TCP + UDP | Coturn STUN/TURN |
@@ -120,25 +108,27 @@ Many providers have a network-level firewall *in addition* to UFW. You must open
 | 49152–65535 | UDP | Coturn relay range |
 | 50000–50200 | UDP | LiveKit media range |
 
-> **Note:** Port 8081 (lk-jwt-service) and 7880 (LiveKit HTTP) do **not** need to be publicly exposed — they are accessed only via Nginx Proxy Manager from inside the same host.
+> Ports 7880 (LiveKit HTTP), 8008 (Synapse), and 8081 (lk-jwt-service) are internal — accessed only via Nginx Proxy Manager from within the host.
 
-Add your SSH public key to the server during creation (or copy it manually with `ssh-copy-id root@YOUR_SERVER_IP`).
+Test that you can log in:
+
+```bash
+ssh root@YOUR_SERVER_IP
+```
 
 ---
 
 ### Step 2: Configure DNS Records
 
-Log into your domain registrar (Namecheap, Cloudflare, GoDaddy, etc.) and add the following **A records**, replacing `YOUR_SERVER_IP` with your server's public IPv4 address:
+Log into your domain registrar and add three **A records**, replacing `YOUR_SERVER_IP` with your server's public IP:
 
-| Type | Name / Host | Value | TTL |
+| Type | Name | Value | TTL |
 |---|---|---|---|
 | A | `matrix` | `YOUR_SERVER_IP` | 3600 |
 | A | `livekit` | `YOUR_SERVER_IP` | 3600 |
 | A | `call-auth` | `YOUR_SERVER_IP` | 3600 |
 
-> **Example:** If your domain is `example.com`, the three hostnames will be `matrix.example.com`, `livekit.example.com`, and `call-auth.example.com`.
-
-**Verify DNS propagation** (wait a few minutes, then run):
+Verify propagation before proceeding (may take a few minutes):
 
 ```bash
 ping -c 2 matrix.example.com
@@ -146,25 +136,23 @@ ping -c 2 livekit.example.com
 ping -c 2 call-auth.example.com
 ```
 
-All three should resolve to your server's IP before proceeding.
-
----
-
-### Step 3: Prepare Your Local Machine
-
-Ensure you have an SSH key and can log into the server:
-
-```bash
-# Generate a key if you don't have one
-ssh-keygen -t ed25519 -C "matrix-deploy"
-
-# Test root access (required for the first Ansible run)
-ssh root@YOUR_SERVER_IP
-```
+All three must resolve to your server's IP.
 
 ---
 
 ## Part 2 — Automated Setup with Ansible
+
+### Step 3: Prepare Your Local Machine
+
+```bash
+# Install Ansible
+pip install ansible
+
+# Confirm your SSH key exists
+ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -C "matrix-deploy"
+```
+
+---
 
 ### Step 4: Clone This Repository
 
@@ -177,215 +165,114 @@ cd matrix-setup
 
 ### Step 5: Generate Secrets
 
-Run the following commands and save the output — you will need them in the next step:
+Run these three commands and save the output for the next step:
 
 ```bash
-# Database password
-openssl rand -hex 16
-
-# Coturn shared secret
-openssl rand -hex 24
-
-# LiveKit secret
-openssl rand -hex 32
+openssl rand -hex 16   # → db_password
+openssl rand -hex 24   # → coturn_secret
+openssl rand -hex 32   # → livekit_secret
 ```
-
-Also choose a strong password for your Matrix admin account.
 
 ---
 
 ### Step 6: Configure Variables
 
-**6a. Edit the inventory file**
+**6a. Edit the inventory**
 
-Open `ansible/inventory.ini` and replace `YOUR_SERVER_IP` with your server's IP:
+Open `ansible/inventory.ini` and replace `YOUR_SERVER_IP` with your server's IP address:
 
 ```ini
-[matrix_servers]
-matrix ansible_host=1.2.3.4 ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ed25519
+[matrix]
+server ansible_host=1.2.3.4 ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ed25519
 ```
 
-> **Note:** Use `ansible_user=root` for the first run. After Ansible creates the `usr` account you can switch to `ansible_user=usr`.
+> Use `ansible_user=root` for the initial run. The playbook will create the `usr` account and harden SSH. Subsequent runs can use `ansible_user=usr`.
 
-**6b. Create your host variables file**
+**6b. Fill in `ansible/vars.yml`**
 
-```bash
-cp ansible/host_vars/YOUR_SERVER_IP.yml.example ansible/host_vars/1.2.3.4.yml
-```
-
-Open `ansible/host_vars/1.2.3.4.yml` and fill in **every** value:
+Open `ansible/vars.yml` and fill in every value:
 
 ```yaml
 matrix_domain: "matrix.example.com"
 livekit_domain: "livekit.example.com"
 call_auth_domain: "call-auth.example.com"
-base_domain: "example.com"
 
 server_public_ip: "1.2.3.4"
 
-db_password: "PASTE_YOUR_DB_PASSWORD"
-coturn_secret: "PASTE_YOUR_COTURN_SECRET"
-livekit_secret: "PASTE_YOUR_LIVEKIT_SECRET"
+db_password: "your_hex_16_value"
+coturn_secret: "your_hex_24_value"
+livekit_secret: "your_hex_32_value"
+livekit_key_id: "matrix-key"
 
 matrix_admin_user: "admin"
-matrix_admin_password: "PASTE_YOUR_ADMIN_PASSWORD"
+matrix_admin_password: "strong_password"
 
-deploy_user: "usr"
-deploy_user_ssh_key: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
+npm_admin_email: "you@example.com"
+npm_admin_password: "strong_password"
 
-ssh_allowed_from: "any"   # or set to your static IP for tighter security
+letsencrypt_email: "you@example.com"
 ```
+
+> **Security note:** `ansible/vars.yml` is in `.gitignore` — your secrets will never be committed.
 
 ---
 
 ### Step 7: Run the Playbook
 
 ```bash
-make install   # Install Ansible collections (run once)
-make run       # Deploy everything
+make install   # install required Ansible collections (once)
+make run       # deploy everything
 ```
 
-What `make run` does, in order:
+**What Ansible does, in order:**
 
-1. **System hardening** — updates packages, creates `usr` user, hardens SSH (disables root + password login), configures UFW firewall, enables fail2ban
-2. **Docker install** — installs Docker Engine and Compose plugin, adds `usr` to the `docker` group
-3. **Matrix deploy** — writes all config files from templates, generates Synapse config, starts the full Docker Compose stack, waits for Synapse to be healthy, creates the admin user
+| Phase | Role | Actions |
+|---|---|---|
+| System hardening | `common` | `apt` upgrade, create `usr` user + sudo, harden SSH (disable root + password login), configure UFW with all required ports, enable fail2ban and unattended-upgrades |
+| Docker | `docker` | Install Docker Engine + Compose plugin from official repo, add `usr` to `docker` group |
+| Matrix stack | `matrix` | Write all config files, generate Synapse config, pull and start all containers, wait for Synapse health, create admin user, configure Nginx Proxy Manager via API (set credentials, create 3 proxy hosts with Let's Encrypt SSL, add `.well-known` endpoints) |
 
 > **Total runtime:** approximately 5–10 minutes on a fresh server.
 
-To run only specific parts:
+To run only a specific phase:
 
 ```bash
-make run TAGS=hardening   # Only run system hardening
-make run TAGS=docker      # Only install Docker
-make run TAGS=matrix      # Only deploy Matrix stack
-```
-
-To do a dry run without making changes:
-
-```bash
-make check
-```
-
----
-
-## Part 3 — Post-Deploy: Configure Nginx Proxy Manager
-
-After Ansible completes, Nginx Proxy Manager is running but not yet configured. This step is done **once** through its web UI.
-
-### Step 8: Log In and Create Proxy Hosts
-
-1. Open `http://YOUR_SERVER_IP:81` in your browser
-2. Log in with the default credentials:
-   - **Email:** `admin@example.com`
-   - **Password:** `changeme`
-3. **Change the default password immediately.**
-4. Go to **Hosts → Proxy Hosts → Add Proxy Host** and create the following three entries:
-
-**Host 1 — Synapse**
-
-| Field | Value |
-|---|---|
-| Domain Names | `matrix.example.com` |
-| Forward Hostname/IP | `synapse` (Docker service name) |
-| Forward Port | `8008` |
-| Websockets Support | ✅ On |
-| SSL → Request new certificate | ✅ Force SSL, ✅ HTTP/2 |
-
-**Host 2 — LiveKit**
-
-| Field | Value |
-|---|---|
-| Domain Names | `livekit.example.com` |
-| Forward Hostname/IP | `YOUR_SERVER_IP` |
-| Forward Port | `7880` |
-| Websockets Support | ✅ On (required!) |
-| SSL → Request new certificate | ✅ Force SSL, ✅ HTTP/2 |
-
-**Host 3 — Call Auth (JWT Service)**
-
-| Field | Value |
-|---|---|
-| Domain Names | `call-auth.example.com` |
-| Forward Hostname/IP | `YOUR_SERVER_IP` |
-| Forward Port | `8081` |
-| Websockets Support | ✅ On |
-| SSL → Request new certificate | ✅ Force SSL, ✅ HTTP/2 |
-
-> **Important for LiveKit and Call-Auth:** Use `YOUR_SERVER_IP` (not `localhost` or `127.0.0.1`) because LiveKit runs with `network_mode: host` and Nginx Proxy Manager runs inside Docker — `localhost` inside NPM's container points to NPM itself, not to the host.
-
----
-
-### Step 9: Add .well-known for LiveKit Discovery
-
-Matrix clients (Element X, Element Call) need to discover the LiveKit server via a `.well-known` file. This is served from the **Synapse** proxy host.
-
-1. In Nginx Proxy Manager, edit the `matrix.example.com` proxy host
-2. Click the **Advanced** tab
-3. Paste the following into the **Custom Nginx Configuration** box (replace with your actual domains):
-
-```nginx
-location /.well-known/matrix/client {
-    add_header Access-Control-Allow-Origin '*';
-    add_header Content-Type application/json;
-    return 200 '{
-        "m.homeserver": {
-            "base_url": "https://matrix.example.com"
-        },
-        "org.matrix.msc4143.rtc_foci": [
-            {
-                "type": "livekit",
-                "livekit_service_url": "https://call-auth.example.com"
-            }
-        ]
-    }';
-}
-
-location /.well-known/matrix/server {
-    add_header Access-Control-Allow-Origin '*';
-    add_header Content-Type application/json;
-    return 200 '{"m.server": "matrix.example.com:443"}';
-}
-```
-
-4. Click **Save**
-
-**Verify it works:**
-
-```bash
-curl https://matrix.example.com/.well-known/matrix/client
-curl https://matrix.example.com/.well-known/matrix/server
+make hardening   # system hardening only
+make docker      # Docker install only
+make matrix      # Matrix stack only
+make check       # dry run (no changes made)
 ```
 
 ---
 
 ## Verification
 
-Run through this checklist after the full setup:
+After the playbook completes, verify the stack is working:
 
 ```bash
-# 1. Check all containers are running
+# All containers should be Up
 ssh usr@YOUR_SERVER_IP "docker compose -f ~/matrix/docker-compose.yml ps"
 
-# 2. Check Synapse is healthy
+# Synapse federation endpoint
 curl https://matrix.example.com/_matrix/client/versions
 
-# 3. Check well-known
+# well-known discovery (used by Element X for LiveKit)
 curl https://matrix.example.com/.well-known/matrix/client
+curl https://matrix.example.com/.well-known/matrix/server
 
-# 4. Check LiveKit is alive (look for "started listening")
+# LiveKit health (look for "started listening" in logs)
 ssh usr@YOUR_SERVER_IP "docker logs matrix-livekit-1 2>&1 | tail -20"
 ```
 
 **Connect with a Matrix client:**
 
 1. Open [Element Web](https://app.element.io) or install Element X on mobile
-2. When prompted for homeserver, enter: `https://matrix.example.com`
-3. Log in with `@admin:matrix.example.com` and the password you set
+2. Enter your homeserver URL: `https://matrix.example.com`
+3. Log in as `@admin:matrix.example.com` with the password you set
 
 **Synapse Admin UI:**
 
-Access at `http://YOUR_SERVER_IP:8080` — log in with your Matrix admin credentials and the homeserver URL `https://matrix.example.com`.
+Access at `http://YOUR_SERVER_IP:8080` — log in with your Matrix admin credentials and homeserver URL `https://matrix.example.com`.
 
 ---
 
@@ -396,16 +283,15 @@ Access at `http://YOUR_SERVER_IP:8080` — log in with your Matrix admin credent
 | 22 | TCP | SSH | Yes |
 | 80 | TCP | HTTP (redirects to HTTPS) | Yes |
 | 443 | TCP | HTTPS | Yes |
-| 81 | TCP | Nginx Proxy Manager UI | Yes |
-| 3478 | TCP+UDP | Coturn STUN/TURN | Yes |
-| 5349 | TCP+UDP | Coturn STUN/TURN TLS | Yes |
+| 81 | TCP | Nginx Proxy Manager admin UI | Yes |
+| 3478, 5349 | TCP + UDP | Coturn STUN/TURN | Yes |
 | 7881 | TCP | LiveKit WebRTC | Yes |
 | 8080 | TCP | Synapse Admin UI | Yes |
 | 49152–65535 | UDP | Coturn relay range | Yes |
-| 50000–50200 | UDP | LiveKit media | Yes |
-| 7880 | TCP | LiveKit HTTP (internal) | No — via NPM only |
-| 8008 | TCP | Synapse (internal) | No — via NPM only |
-| 8081 | TCP | lk-jwt-service | No — via NPM only |
+| 50000–50200 | UDP | LiveKit media range | Yes |
+| 7880 | TCP | LiveKit HTTP (internal) | No — proxied via NPM |
+| 8008 | TCP | Synapse (internal) | No — proxied via NPM |
+| 8081 | TCP | lk-jwt-service (internal) | No — proxied via NPM |
 | 5432 | TCP | PostgreSQL (internal) | No |
 
 ---
@@ -414,65 +300,60 @@ Access at `http://YOUR_SERVER_IP:8080` — log in with your Matrix admin credent
 
 ```
 /home/usr/matrix/
-├── .env                        # Secrets (not committed to git)
-├── docker-compose.yml          # Full stack definition
+├── docker-compose.yml          # Full stack definition (all secrets inlined)
 ├── coturn/
-│   └── turnserver.conf         # Coturn configuration
+│   └── turnserver.conf
 ├── livekit/
-│   └── livekit.yaml            # LiveKit configuration
+│   └── livekit.yaml
 ├── nginx/
-│   ├── data/                   # Nginx Proxy Manager data
+│   ├── data/                   # Nginx Proxy Manager runtime data
 │   └── letsencrypt/            # SSL certificates
 ├── postgresdata/               # PostgreSQL data volume
 ├── synapse-data/
-│   ├── homeserver.yaml         # Synapse main config
-│   ├── *.signing.key           # Server signing key
-│   ├── *.log.config            # Log configuration
-│   └── media_store/            # Uploaded media
-└── create-admin.sh             # Script to create admin user manually
+│   ├── homeserver.yaml
+│   ├── *.signing.key
+│   ├── *.log.config
+│   └── media_store/
+└── create-admin.sh             # Helper to create additional Matrix users
 ```
 
 ---
 
 ## Useful Commands
 
-All run from `/home/usr/matrix/` on the server (or via `ssh usr@SERVER`):
+Run on the server from `/home/usr/matrix/`:
 
 ```bash
-# View running containers
+# View all containers and their status
 docker compose ps
 
-# Follow all logs
+# Follow logs for all services
 docker compose logs -f
 
-# Follow only Synapse logs
+# Follow logs for a single service
 docker compose logs -f synapse
 
 # Restart the entire stack
 docker compose restart
 
-# Restart only Synapse
+# Restart a single service
 docker compose restart synapse
 
-# Stop everything
-docker compose down
+# Stop and start the full stack
+docker compose down && docker compose up -d
 
-# Start everything
-docker compose up -d
-
-# Create a new (non-admin) Matrix user
+# Create an additional (non-admin) Matrix user
 docker exec -it matrix-synapse-1 register_new_matrix_user \
     -c /data/homeserver.yaml http://localhost:8008 \
     -u USERNAME -p PASSWORD
 
-# Create a new admin Matrix user
+# Create an additional admin Matrix user
 docker exec -it matrix-synapse-1 register_new_matrix_user \
     -c /data/homeserver.yaml http://localhost:8008 \
     --admin -u USERNAME -p PASSWORD
 
 # Check disk usage
-df -h
-docker system df
+df -h && docker system df
 ```
 
 ---
@@ -481,7 +362,7 @@ docker system df
 
 ### Synapse fails to start — database collation error
 
-Synapse requires the PostgreSQL database to use `C` collation. The docker-compose.yml in this repo already sets this via `POSTGRES_INITDB_ARGS`. If you are migrating an old database, you need to recreate it:
+The `docker-compose.yml` already sets `POSTGRES_INITDB_ARGS` to enforce `C` collation. If you see this error on an existing deployment with stale data:
 
 ```bash
 docker compose down
@@ -489,31 +370,47 @@ sudo rm -rf ~/matrix/postgresdata/
 docker compose up -d
 ```
 
-### DNS_PROBE_FINISHED_NXDOMAIN in browser
+### DNS not resolving (`DNS_PROBE_FINISHED_NXDOMAIN`)
 
-Your DNS records have not propagated yet. Wait a few minutes, then verify:
+DNS propagation is not complete yet. Verify from the command line:
 
 ```bash
 nslookup matrix.example.com
 ```
 
-### "Insufficient capacity" error in Element when making a call
+Wait a few minutes and retry. Ansible will also fail at the NPM SSL step if DNS is not ready.
 
-This means Element cannot connect to LiveKit. Check in order:
+### NPM proxy host creation fails (SSL certificate error)
 
-1. **WebSocket support** is enabled on the `livekit.example.com` Nginx Proxy Manager entry
-2. **Cloud firewall** allows UDP 50000–50200 and TCP 7881
-3. LiveKit is healthy: `docker logs matrix-livekit-1 2>&1 | grep -i "started\|error"`
-4. The forward address for LiveKit in NPM uses the server's real IP, not `localhost`
+Let's Encrypt requires the domain to be publicly reachable on port 80. Ensure:
+- DNS A records are fully propagated
+- Port 80 is open in both UFW and any cloud firewall
+- No existing conflicting proxy hosts in NPM
 
-### "MISSING_MATRIX_RTC_TRANSPORT" error in Element
+Re-run only the matrix role after fixing: `make matrix`
 
-The `.well-known/matrix/client` file is not being served correctly, or the custom nginx config in NPM is missing. Re-check [Step 9](#step-9-add-well-known-for-livekit-discovery).
+### "Insufficient capacity" error in Element during a call
+
+Element found the JWT service but cannot reach LiveKit. Check:
+
+1. Cloud firewall allows UDP 50000–50200 and TCP 7881
+2. LiveKit container is healthy: `docker logs matrix-livekit-1 2>&1 | grep -i "started\|error"`
+3. The `livekit.example.com` proxy host in NPM has **WebSocket support** enabled (set automatically by Ansible)
+
+### "MISSING_MATRIX_RTC_TRANSPORT" in Element
+
+The `.well-known/matrix/client` endpoint is not returning valid JSON. Verify:
+
+```bash
+curl -s https://matrix.example.com/.well-known/matrix/client | python3 -m json.tool
+```
+
+If it returns an error, the custom Nginx config in the Synapse proxy host may not have been applied. Re-run `make matrix` to re-apply.
 
 ### SSH locked out after first Ansible run
 
-The playbook disables password auth and root login. Make sure your SSH public key was added before running. If locked out, use your provider's VNC/console to re-add your key or temporarily re-enable password auth.
+The playbook disables password authentication and root login. Ensure your SSH public key was deployed before running. If locked out, use your provider's web console to restore access.
 
-### Ansible fails with "Module not found" for community.docker
+### Ansible fails with "collection not found"
 
-Run `make install` to install required Ansible collections before `make run`.
+Run `make install` before `make run` to install the required Ansible collections.
