@@ -271,7 +271,11 @@ ssh usr@YOUR_SERVER_IP "docker logs matrix-livekit-1 2>&1 | tail -20"
 
 **Synapse Admin UI:**
 
-Access at `http://YOUR_SERVER_IP:8080` — log in with your Matrix admin credentials and homeserver URL `https://matrix.example.com`.
+Access at `https://matrix.example.com/admin` — log in with your Matrix admin credentials and homeserver URL `https://matrix.example.com`.
+
+**Nginx Proxy Manager:**
+
+Access at `https://matrix.example.com/npm` — log in with the `npm_admin_email` and `npm_admin_password` you set in `vars.yml`.
 
 ---
 
@@ -282,15 +286,15 @@ Access at `http://YOUR_SERVER_IP:8080` — log in with your Matrix admin credent
 | 22 | TCP | SSH | Yes |
 | 80 | TCP | HTTP (redirects to HTTPS) | Yes |
 | 443 | TCP | HTTPS | Yes |
-| 81 | TCP | Nginx Proxy Manager admin UI | Yes |
 | 3478, 5349 | TCP + UDP | Coturn STUN/TURN | Yes |
 | 7881 | TCP | LiveKit WebRTC | Yes |
-| 8080 | TCP | Synapse Admin UI | Yes |
 | 49152–65535 | UDP | Coturn relay range | Yes |
 | 50000–50200 | UDP | LiveKit media range | Yes |
 | 7880 | TCP | LiveKit HTTP (internal) | No — proxied via NPM |
 | 8008 | TCP | Synapse (internal) | No — proxied via NPM |
 | 8081 | TCP | lk-jwt-service (internal) | No — proxied via NPM |
+| 81 | TCP | NPM admin UI (internal) | No — served at `/npm` subpath |
+| 80 (container) | TCP | Synapse Admin (internal) | No — served at `/admin` subpath |
 | 5432 | TCP | PostgreSQL (internal) | No |
 
 ---
@@ -381,7 +385,7 @@ docker exec -it matrix-synapse-1 register_new_matrix_user \
 
 **Option 2 — Synapse Admin UI:**
 
-Open `http://YOUR_SERVER_IP:8080`, log in with your admin Matrix account and homeserver URL `https://matrix.example.com`, then go to **Users → Create user**.
+Open `https://matrix.example.com/admin`, log in with your admin Matrix account and homeserver URL `https://matrix.example.com`, then go to **Users → Create user**.
 
 ---
 

@@ -88,20 +88,6 @@
     proto: tcp
     comment: HTTPS
 
-- name: Allow Nginx Proxy Manager admin UI through UFW
-  community.general.ufw:
-    rule: allow
-    port: "81"
-    proto: tcp
-    comment: Nginx Proxy Manager admin
-
-- name: Allow Synapse admin UI through UFW
-  community.general.ufw:
-    rule: allow
-    port: "8080"
-    proto: tcp
-    comment: Synapse Admin UI
-
 - name: Allow Coturn STUN/TURN (TCP)
   community.general.ufw:
     rule: allow
