@@ -341,19 +341,47 @@ docker compose restart synapse
 # Stop and start the full stack
 docker compose down && docker compose up -d
 
-# Create an additional (non-admin) Matrix user
+# Check disk usage
+df -h && docker system df
+```
+
+---
+
+## User Management
+
+Open registration is **disabled** by default — users cannot sign up on their own. All accounts must be created by an admin.
+
+**Enabling open registration**
+
+To allow anyone to create an account, set `enable_registration: true` in `ansible/vars.yml` and re-run the playbook:
+
+```bash
+make run
+```
+
+Synapse will restart with registration open. Users can then sign up directly from any Matrix client by pointing it at your homeserver.
+
+> **Note:** Only do this if you intend your server to be public. An open server without additional rate-limiting can be abused for spam.
+
+**Creating accounts manually (registration closed)**
+
+**Option 1 — Command line (SSH into the server):**
+
+```bash
+# Create a regular user
 docker exec -it matrix-synapse-1 register_new_matrix_user \
     -c /data/homeserver.yaml http://localhost:8008 \
     -u USERNAME -p PASSWORD
 
-# Create an additional admin Matrix user
+# Create an admin user
 docker exec -it matrix-synapse-1 register_new_matrix_user \
     -c /data/homeserver.yaml http://localhost:8008 \
     --admin -u USERNAME -p PASSWORD
-
-# Check disk usage
-df -h && docker system df
 ```
+
+**Option 2 — Synapse Admin UI:**
+
+Open `http://YOUR_SERVER_IP:8080`, log in with your admin Matrix account and homeserver URL `https://matrix.example.com`, then go to **Users → Create user**.
 
 ---
 

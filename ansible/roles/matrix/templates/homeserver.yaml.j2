@@ -33,6 +33,11 @@ signing_key_path: "/data/{{ matrix_domain }}.signing.key"
 
 report_stats: true
 
+enable_registration: {{ enable_registration | lower }}
+{% if enable_registration %}
+enable_registration_without_verification: true
+{% endif %}
+
 trusted_key_servers:
   - server_name: "matrix.org"
 
