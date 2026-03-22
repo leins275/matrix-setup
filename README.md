@@ -220,8 +220,7 @@ letsencrypt_email: "you@example.com"
 ### Step 7: Run the Playbook
 
 ```bash
-make install   # install required Ansible collections (once)
-make run       # deploy everything
+make run       # installs Ansible collections and deploys everything
 ```
 
 **What Ansible does, in order:**

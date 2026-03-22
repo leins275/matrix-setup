@@ -26,7 +26,7 @@ install: ## Install required Ansible collections
 
 ##@ Deployment
 
-run: ## Run the full Ansible playbook (set TAGS=hardening|docker|matrix to run a subset)
+run: install ## Run the full Ansible playbook (set TAGS=hardening|docker|matrix to run a subset)
 	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(TAGS_FLAG)
 
 check: ## Dry-run the playbook without making changes
@@ -46,10 +46,10 @@ matrix: ## Run only the Matrix stack deployment role
 ##@ Utilities
 
 ping: ## Test SSH connectivity to all hosts
-	ansible -i $(INVENTORY) matrix_servers -m ping
+	ansible -i $(INVENTORY) matrix -m ping
 
 facts: ## Gather and display host facts
-	ansible -i $(INVENTORY) matrix_servers -m setup
+	ansible -i $(INVENTORY) matrix -m setup
 
 lint: ## Lint the Ansible playbook (requires ansible-lint)
 	ansible-lint $(PLAYBOOK)
