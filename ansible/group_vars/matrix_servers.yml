@@ -1,0 +1,32 @@
+---
+# Matrix server configuration
+# Copy this file to host_vars/YOUR_SERVER_IP.yml and fill in your values
+
+# Domain configuration
+matrix_domain: "matrix.example.com"       # Synapse homeserver domain
+livekit_domain: "livekit.example.com"     # LiveKit SFU domain
+call_auth_domain: "call-auth.example.com" # JWT auth service domain
+base_domain: "example.com"                # Root domain (for well-known)
+
+# Server public IP (needed for coturn external-ip)
+server_public_ip: "YOUR_SERVER_IP"
+
+# Secrets - generate with: openssl rand -hex 16/24/32
+db_password: "CHANGE_ME_openssl_rand_hex_16"
+coturn_secret: "CHANGE_ME_openssl_rand_hex_24"
+livekit_secret: "CHANGE_ME_openssl_rand_hex_32"
+
+# Matrix admin user
+matrix_admin_user: "admin"
+matrix_admin_password: "CHANGE_ME_strong_password"
+
+# Non-root deploy user (created during server hardening)
+deploy_user: "usr"
+deploy_user_ssh_key: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
+
+# Matrix project directory on the server
+matrix_project_dir: "/home/usr/matrix"
+
+# UFW: additional allowed IPs for SSH (leave empty to allow from anywhere)
+# ssh_allowed_from: "YOUR_TRUSTED_IP"
+ssh_allowed_from: "any"

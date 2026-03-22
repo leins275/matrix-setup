@@ -1,0 +1,41 @@
+---
+# Host-specific variables for your Matrix server
+# Rename this file to YOUR_SERVER_IP.yml (e.g., 1.2.3.4.yml)
+# and fill in every value below.
+
+# -------------------------------------------------------------------
+# DOMAIN NAMES  (all three must have A records pointing to your server)
+# -------------------------------------------------------------------
+matrix_domain: "matrix.example.com"
+livekit_domain: "livekit.example.com"
+call_auth_domain: "call-auth.example.com"
+base_domain: "example.com"
+
+# -------------------------------------------------------------------
+# SERVER
+# -------------------------------------------------------------------
+server_public_ip: "1.2.3.4"
+
+# -------------------------------------------------------------------
+# SECRETS  — generate with the commands shown in the README
+# -------------------------------------------------------------------
+db_password: "REPLACE_WITH_openssl_rand_hex_16"
+coturn_secret: "REPLACE_WITH_openssl_rand_hex_24"
+livekit_secret: "REPLACE_WITH_openssl_rand_hex_32"
+
+# -------------------------------------------------------------------
+# MATRIX ADMIN ACCOUNT  (created automatically on first run)
+# -------------------------------------------------------------------
+matrix_admin_user: "admin"
+matrix_admin_password: "REPLACE_WITH_strong_password"
+
+# -------------------------------------------------------------------
+# DEPLOY USER  (non-root user that will be created on the server)
+# -------------------------------------------------------------------
+deploy_user: "usr"
+deploy_user_ssh_key: "{{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
+
+# -------------------------------------------------------------------
+# UFW SSH restriction (set to your IP or leave "any")
+# -------------------------------------------------------------------
+ssh_allowed_from: "any"

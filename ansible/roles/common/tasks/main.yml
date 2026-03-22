@@ -1,0 +1,164 @@
+---
+- name: Update and upgrade all packages
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: dist
+    autoremove: true
+    autoclean: true
+
+- name: Install essential packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - git
+      - htop
+      - ufw
+      - fail2ban
+      - unattended-upgrades
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - python3-pip
+      - tmux
+      - vim
+    state: present
+
+- name: Create non-root deploy user
+  ansible.builtin.user:
+    name: "{{ deploy_user }}"
+    shell: /bin/bash
+    groups: sudo
+    append: true
+    create_home: true
+    state: present
+
+- name: Add SSH public key for deploy user
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user }}"
+    state: present
+    key: "{{ deploy_user_ssh_key }}"
+
+- name: Allow deploy user to run sudo without password
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers.d/{{ deploy_user }}
+    line: "{{ deploy_user }} ALL=(ALL) NOPASSWD:ALL"
+    create: true
+    validate: "visudo -cf %s"
+    mode: "0440"
+
+- name: Harden SSH configuration
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: "0600"
+    backup: true
+  notify: Restart SSH
+
+- name: Configure UFW defaults
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+    - { direction: routed, policy: deny }
+
+- name: Allow SSH through UFW
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from_ip: "{{ ssh_allowed_from | default('any') }}"
+    comment: SSH
+
+- name: Allow HTTP through UFW
+  community.general.ufw:
+    rule: allow
+    port: "80"
+    proto: tcp
+    comment: HTTP
+
+- name: Allow HTTPS through UFW
+  community.general.ufw:
+    rule: allow
+    port: "443"
+    proto: tcp
+    comment: HTTPS
+
+- name: Allow Nginx Proxy Manager admin UI through UFW
+  community.general.ufw:
+    rule: allow
+    port: "81"
+    proto: tcp
+    comment: Nginx Proxy Manager admin
+
+- name: Allow Synapse admin UI through UFW
+  community.general.ufw:
+    rule: allow
+    port: "8080"
+    proto: tcp
+    comment: Synapse Admin UI
+
+- name: Allow Coturn STUN/TURN (TCP)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    comment: Coturn STUN/TURN TCP
+  loop:
+    - "3478"
+    - "5349"
+
+- name: Allow Coturn STUN/TURN (UDP)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: udp
+    comment: Coturn STUN/TURN UDP
+  loop:
+    - "3478"
+    - "5349"
+
+- name: Allow Coturn relay ports (UDP)
+  community.general.ufw:
+    rule: allow
+    port: "49152:65535"
+    proto: udp
+    comment: Coturn relay UDP range
+
+- name: Allow LiveKit WebRTC TCP
+  community.general.ufw:
+    rule: allow
+    port: "7881"
+    proto: tcp
+    comment: LiveKit WebRTC TCP
+
+- name: Allow LiveKit media UDP range
+  community.general.ufw:
+    rule: allow
+    port: "50000:50200"
+    proto: udp
+    comment: LiveKit media UDP range
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+- name: Enable and start fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: true
+    state: started
+
+- name: Enable unattended-upgrades
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    enabled: true
+    state: started
+
+- name: Set timezone to UTC
+  community.general.timezone:
+    name: UTC

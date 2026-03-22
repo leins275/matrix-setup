@@ -1,0 +1,33 @@
+# Managed by Ansible - do not edit manually
+# SSH hardening configuration
+
+Port 22
+Protocol 2
+AddressFamily inet
+
+# Authentication
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+UsePAM yes
+
+# Connection settings
+LoginGraceTime 30
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+# Disable unused features
+X11Forwarding no
+PrintMotd no
+AcceptEnv LANG LC_*
+
+# SFTP subsystem
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Allowed users
+AllowUsers {{ deploy_user }} root

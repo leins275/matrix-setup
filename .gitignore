@@ -1,0 +1,29 @@
+# Ansible secrets and host-specific vars (never commit real values)
+ansible/host_vars/*.yml
+!ansible/host_vars/*.yml.example
+
+# Synapse signing key and secrets
+matrix/synapse-data/*.signing.key
+matrix/.env
+
+# Docker persistent volumes
+matrix/postgresdata/
+matrix/nginx/data/
+matrix/nginx/letsencrypt/
+matrix/synapse-data/media_store/
+
+# Ansible retry files
+*.retry
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editor
+.DS_Store
+.idea/
+*.swp
+*.swo
+
+matrix/

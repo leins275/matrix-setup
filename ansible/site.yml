@@ -1,0 +1,12 @@
+---
+- name: Deploy Matrix Synapse stack
+  hosts: matrix_servers
+  become: true
+
+  roles:
+    - role: common
+      tags: [common, hardening]
+    - role: docker
+      tags: [docker]
+    - role: matrix
+      tags: [matrix]
