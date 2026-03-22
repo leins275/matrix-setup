@@ -77,7 +77,7 @@ After completing the two manual steps (server creation and DNS), run `make insta
 
 ### Server
 
-- Ubuntu 22.04 LTS or 24.04 LTS
+- Ubuntu 24.04 LTS
 - Minimum 2 vCPU, 2 GB RAM, 20 GB SSD
 - A public IPv4 address
 - Root SSH access on the fresh server
@@ -90,7 +90,7 @@ These two steps must be done **before** running Ansible, as they require externa
 
 ### Step 1: Create a VPS
 
-Create a fresh Ubuntu 22.04 server at your preferred provider (Hetzner, DigitalOcean, Vultr, Linode, etc.).
+Create a fresh Ubuntu 24.04 server at your preferred provider (Hetzner, DigitalOcean, Vultr, Linode, etc.).
 
 **During creation:** add your SSH public key so you can connect as root.
 
