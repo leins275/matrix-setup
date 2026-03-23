@@ -434,6 +434,19 @@ Let's Encrypt requires the domain to be publicly reachable on port 80. Ensure:
 
 Re-run only the matrix role after fixing: `make matrix`
 
+The playbook automatically clears any stale Let's Encrypt state for a domain before attempting issuance, so re-running `make matrix` is always safe.
+
+**To force-renew a certificate that already exists** (e.g. after migrating to a new server), delete the cert directory on the server and re-run:
+
+```bash
+# On the server, in ~/matrix/
+rm -rf nginx/letsencrypt/live/matrix.example.com
+rm -rf nginx/letsencrypt/archive/matrix.example.com
+rm -f  nginx/letsencrypt/renewal/matrix.example.com.conf
+```
+
+Then run `make matrix` — the playbook will issue a fresh certificate.
+
 ### "Insufficient capacity" error in Element during a call
 
 Element found the JWT service but cannot reach LiveKit. Check:

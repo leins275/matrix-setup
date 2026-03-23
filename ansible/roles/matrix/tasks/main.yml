@@ -150,6 +150,21 @@
   delay: 5
   until: nginx_ready.status in [200, 404]
 
+- name: Check if matrix_domain cert exists
+  ansible.builtin.stat:
+    path: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ matrix_domain }}/fullchain.pem"
+  register: cert_matrix
+
+- name: Clear stale letsencrypt state for matrix_domain (if cert not yet issued)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/renewal/{{ matrix_domain }}.conf"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/archive/{{ matrix_domain }}"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ matrix_domain }}"
+  when: not cert_matrix.stat.exists
+
 - name: Issue TLS certificate for matrix_domain
   ansible.builtin.command:
     cmd: >
@@ -158,11 +173,26 @@
       -v {{ matrix_project_dir }}/nginx/certbot-webroot:/var/www/certbot
       certbot/certbot certonly
       --webroot -w /var/www/certbot
-      --non-interactive --agree-tos --force-renewal
+      --non-interactive --agree-tos
       -m {{ letsencrypt_email }}
       -d {{ matrix_domain }}
     creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ matrix_domain }}/fullchain.pem"
   become_user: "{{ deploy_user }}"
+
+- name: Check if livekit_domain cert exists
+  ansible.builtin.stat:
+    path: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ livekit_domain }}/fullchain.pem"
+  register: cert_livekit
+
+- name: Clear stale letsencrypt state for livekit_domain (if cert not yet issued)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/renewal/{{ livekit_domain }}.conf"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/archive/{{ livekit_domain }}"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ livekit_domain }}"
+  when: not cert_livekit.stat.exists
 
 - name: Issue TLS certificate for livekit_domain
   ansible.builtin.command:
@@ -172,11 +202,26 @@
       -v {{ matrix_project_dir }}/nginx/certbot-webroot:/var/www/certbot
       certbot/certbot certonly
       --webroot -w /var/www/certbot
-      --non-interactive --agree-tos --force-renewal
+      --non-interactive --agree-tos
       -m {{ letsencrypt_email }}
       -d {{ livekit_domain }}
     creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ livekit_domain }}/fullchain.pem"
   become_user: "{{ deploy_user }}"
+
+- name: Check if call_auth_domain cert exists
+  ansible.builtin.stat:
+    path: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ call_auth_domain }}/fullchain.pem"
+  register: cert_call_auth
+
+- name: Clear stale letsencrypt state for call_auth_domain (if cert not yet issued)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/renewal/{{ call_auth_domain }}.conf"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/archive/{{ call_auth_domain }}"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ call_auth_domain }}"
+  when: not cert_call_auth.stat.exists
 
 - name: Issue TLS certificate for call_auth_domain
   ansible.builtin.command:
@@ -186,7 +231,7 @@
       -v {{ matrix_project_dir }}/nginx/certbot-webroot:/var/www/certbot
       certbot/certbot certonly
       --webroot -w /var/www/certbot
-      --non-interactive --agree-tos --force-renewal
+      --non-interactive --agree-tos
       -m {{ letsencrypt_email }}
       -d {{ call_auth_domain }}
     creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ call_auth_domain }}/fullchain.pem"
