@@ -205,3 +205,11 @@
 
 - name: Flush handlers to reload nginx immediately
   ansible.builtin.meta: flush_handlers
+
+- name: Reload nginx unconditionally (ensures activation even on idempotent re-runs)
+  ansible.builtin.command:
+    cmd: docker compose exec nginx nginx -s reload
+  args:
+    chdir: "{{ matrix_project_dir }}"
+  become_user: "{{ deploy_user }}"
+  changed_when: false
