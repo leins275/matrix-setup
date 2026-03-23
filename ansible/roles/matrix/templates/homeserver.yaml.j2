@@ -25,9 +25,9 @@ database:
 log_config: "/data/{{ matrix_domain }}.log.config"
 media_store_path: /data/media_store
 
-registration_shared_secret: "{{ lookup('password', '/dev/null length=48 chars=ascii_letters,digits') }}"
-macaroon_secret_key: "{{ lookup('password', '/dev/null length=48 chars=ascii_letters,digits') }}"
-form_secret: "{{ lookup('password', '/dev/null length=48 chars=ascii_letters,digits') }}"
+registration_shared_secret: "{{ registration_shared_secret }}"
+macaroon_secret_key: "{{ macaroon_secret_key }}"
+form_secret: "{{ form_secret }}"
 
 signing_key_path: "/data/{{ matrix_domain }}.signing.key"
 

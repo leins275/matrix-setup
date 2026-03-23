@@ -76,6 +76,7 @@
     owner: "991"
     group: "991"
     mode: "0640"
+  notify: Restart synapse
 
 # ── Helper scripts ────────────────────────────────────────────────────────────
 
@@ -104,14 +105,18 @@
     project_src: "{{ matrix_project_dir }}"
     state: present
     pull: always
+    docker_host: "unix:///var/run/docker.sock"
   become_user: "{{ deploy_user }}"
+
+- name: Flush handlers (restart synapse if config changed)
+  ansible.builtin.meta: flush_handlers
 
 - name: Wait for Synapse to become healthy
   ansible.builtin.uri:
     url: "http://localhost:8008/_matrix/client/versions"
     status_code: 200
   register: synapse_health
-  retries: 20
+  retries: 30
   delay: 10
   until: synapse_health.status == 200
 
@@ -131,7 +136,7 @@
   register: admin_create_result
   failed_when:
     - admin_create_result.rc != 0
-    - "'User ID already taken' not in admin_create_result.stderr"
+    - "'User ID already taken' not in admin_create_result.stdout"
   changed_when: admin_create_result.rc == 0
 
 # ── TLS certificate issuance ──────────────────────────────────────────────────
@@ -153,7 +158,7 @@
       -v {{ matrix_project_dir }}/nginx/certbot-webroot:/var/www/certbot
       certbot/certbot certonly
       --webroot -w /var/www/certbot
-      --non-interactive --agree-tos
+      --non-interactive --agree-tos --force-renewal
       -m {{ letsencrypt_email }}
       -d {{ matrix_domain }}
     creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ matrix_domain }}/fullchain.pem"
@@ -167,7 +172,7 @@
       -v {{ matrix_project_dir }}/nginx/certbot-webroot:/var/www/certbot
       certbot/certbot certonly
       --webroot -w /var/www/certbot
-      --non-interactive --agree-tos
+      --non-interactive --agree-tos --force-renewal
       -m {{ letsencrypt_email }}
       -d {{ livekit_domain }}
     creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ livekit_domain }}/fullchain.pem"
@@ -181,7 +186,7 @@
       -v {{ matrix_project_dir }}/nginx/certbot-webroot:/var/www/certbot
       certbot/certbot certonly
       --webroot -w /var/www/certbot
-      --non-interactive --agree-tos
+      --non-interactive --agree-tos --force-renewal
       -m {{ letsencrypt_email }}
       -d {{ call_auth_domain }}
     creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ call_auth_domain }}/fullchain.pem"

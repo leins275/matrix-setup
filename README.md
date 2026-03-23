@@ -162,12 +162,15 @@ cd matrix-setup
 
 ### Step 5: Generate Secrets
 
-Run these three commands and save the output for the next step:
+Run these commands and save the output for the next step:
 
 ```bash
 openssl rand -hex 16   # → db_password
 openssl rand -hex 24   # → coturn_secret
 openssl rand -hex 32   # → livekit_secret
+openssl rand -hex 32   # → registration_shared_secret
+openssl rand -hex 32   # → macaroon_secret_key
+openssl rand -hex 32   # → form_secret
 ```
 
 ---
@@ -205,6 +208,9 @@ server_public_ip: "1.2.3.4"
 db_password: "your_hex_16_value"
 coturn_secret: "your_hex_24_value"
 livekit_secret: "your_hex_32_value"
+registration_shared_secret: "your_hex_32_value"
+macaroon_secret_key: "your_hex_32_value"
+form_secret: "your_hex_32_value"
 livekit_key_id: "matrix-key"
 
 matrix_admin_user: "admin"
