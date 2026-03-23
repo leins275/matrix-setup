@@ -11,17 +11,17 @@
 
 - name: Create subdirectories
   ansible.builtin.file:
-    path: "{{ matrix_project_dir }}/{{ item }}"
+    path: "{{ matrix_project_dir }}/{{ item.path }}"
     state: directory
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
     mode: "0755"
   loop:
-    - coturn
-    - livekit
-    - nginx/letsencrypt
-    - nginx/certbot-webroot
-    - synapse-data
+    - { path: coturn,              owner: "{{ deploy_user }}" }
+    - { path: livekit,             owner: "{{ deploy_user }}" }
+    - { path: nginx/letsencrypt,   owner: "{{ deploy_user }}" }
+    - { path: nginx/certbot-webroot, owner: "{{ deploy_user }}" }
+    - { path: synapse-data,        owner: "991" }
 
 # ── Config files ─────────────────────────────────────────────────────────────
 
@@ -62,28 +62,20 @@
     creates: "{{ matrix_project_dir }}/synapse-data/homeserver.yaml"
   become_user: "{{ deploy_user }}"
 
-- name: Fix synapse-data ownership after Docker generation
+- name: Set synapse-data ownership to UID 991 (Synapse container user)
   ansible.builtin.file:
     path: "{{ matrix_project_dir }}/synapse-data"
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
+    owner: "991"
+    group: "991"
     recurse: true
-
-- name: Ensure synapse-data files are world-readable (Synapse runs as UID 991)
-  ansible.builtin.command:
-    cmd: find {{ matrix_project_dir }}/synapse-data -type f -exec chmod o+r {} +
-
-- name: Ensure synapse-data directories are world-executable
-  ansible.builtin.command:
-    cmd: find {{ matrix_project_dir }}/synapse-data -type d -exec chmod o+rx {} +
 
 - name: Deploy Synapse homeserver.yaml
   ansible.builtin.template:
     src: homeserver.yaml.j2
     dest: "{{ matrix_project_dir }}/synapse-data/homeserver.yaml"
-    owner: "{{ deploy_user }}"
-    group: "{{ deploy_user }}"
-    mode: "0644"
+    owner: "991"
+    group: "991"
+    mode: "0640"
 
 # ── Helper scripts ────────────────────────────────────────────────────────────
 
