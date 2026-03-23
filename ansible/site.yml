@@ -1,14 +1,5 @@
 ---
-- name: Deploy Matrix Synapse stack
-  hosts: matrix
-  become: true
-  vars_files:
-    - vars.yml
-
-  roles:
-    - role: common
-      tags: [common, hardening]
-    - role: docker
-      tags: [docker]
-    - role: matrix
-      tags: [matrix]
+# Combined playbook — runs both install and deploy in one shot.
+# Only works on a fresh server before SSH hardening disables root login.
+- import_playbook: install.yml
+- import_playbook: deploy.yml

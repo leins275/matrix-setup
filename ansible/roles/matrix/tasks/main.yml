@@ -31,7 +31,7 @@
     dest: "{{ matrix_project_dir }}/docker-compose.yml"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
-    mode: "0640"
+    mode: "0644"
 
 - name: Deploy coturn configuration
   ansible.builtin.template:
@@ -39,7 +39,7 @@
     dest: "{{ matrix_project_dir }}/coturn/turnserver.conf"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
-    mode: "0640"
+    mode: "0644"
 
 - name: Deploy LiveKit configuration
   ansible.builtin.template:
@@ -47,7 +47,7 @@
     dest: "{{ matrix_project_dir }}/livekit/livekit.yaml"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
-    mode: "0640"
+    mode: "0644"
 
 # ── Synapse config generation ─────────────────────────────────────────────────
 
@@ -69,13 +69,21 @@
     group: "{{ deploy_user }}"
     recurse: true
 
+- name: Ensure synapse-data files are world-readable (Synapse runs as UID 991)
+  ansible.builtin.command:
+    cmd: find {{ matrix_project_dir }}/synapse-data -type f -exec chmod o+r {} +
+
+- name: Ensure synapse-data directories are world-executable
+  ansible.builtin.command:
+    cmd: find {{ matrix_project_dir }}/synapse-data -type d -exec chmod o+rx {} +
+
 - name: Deploy Synapse homeserver.yaml
   ansible.builtin.template:
     src: homeserver.yaml.j2
     dest: "{{ matrix_project_dir }}/synapse-data/homeserver.yaml"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
-    mode: "0640"
+    mode: "0644"
 
 # ── Helper scripts ────────────────────────────────────────────────────────────
 
@@ -95,7 +103,7 @@
     dest: "{{ matrix_project_dir }}/nginx/nginx.conf"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
-    mode: "0640"
+    mode: "0644"
 
 # ── Stack startup ─────────────────────────────────────────────────────────────
 
@@ -195,7 +203,7 @@
     dest: "{{ matrix_project_dir }}/nginx/nginx.conf"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
-    mode: "0640"
+    mode: "0644"
   notify: Reload nginx
 
 - name: Flush handlers to reload nginx immediately

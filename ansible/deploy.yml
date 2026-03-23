@@ -1,0 +1,14 @@
+---
+# Run as the deploy user after install.yml has completed.
+# Deploys the full Matrix stack with Docker Compose, issues TLS certificates,
+# and creates the Matrix admin user.
+- name: Deploy Matrix stack (run as usr)
+  hosts: matrix
+  remote_user: "{{ deploy_user }}"
+  become: true
+  vars_files:
+    - vars.yml
+
+  roles:
+    - role: matrix
+      tags: [matrix]

@@ -1,16 +1,7 @@
-.PHONY: install run check hardening docker matrix help
+.PHONY: collections install deploy check hardening docker matrix ping facts lint help
 
 ANSIBLE_DIR := ansible
-PLAYBOOK    := $(ANSIBLE_DIR)/site.yml
 INVENTORY   := $(ANSIBLE_DIR)/inventory.ini
-TAGS        ?=
-
-# Build the --tags flag only when TAGS is non-empty
-ifdef TAGS
-  TAGS_FLAG := --tags $(TAGS)
-else
-  TAGS_FLAG :=
-endif
 
 ##@ General
 
@@ -21,35 +12,38 @@ help: ## Show this help message
 
 ##@ Setup
 
-install: ## Install required Ansible collections
+collections: ## Install required Ansible collections
 	ansible-galaxy collection install -r $(ANSIBLE_DIR)/requirements.yml
 
 ##@ Deployment
 
-run: install ## Run the full Ansible playbook (set TAGS=hardening|docker|matrix to run a subset)
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) $(TAGS_FLAG)
+install: collections ## Bootstrap server as root (system hardening + Docker)
+	ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/install.yml
 
-check: ## Dry-run the playbook without making changes
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) --check --diff $(TAGS_FLAG)
+deploy: collections ## Deploy Matrix stack as deploy user (requires install to have run first)
+	ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/deploy.yml
+
+check: collections ## Dry-run the full playbook without making changes
+	ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/site.yml --check --diff
 
 ##@ Individual roles
 
-hardening: ## Run only the system hardening role (common)
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) --tags common
+hardening: collections ## Run only the system hardening role
+	ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/install.yml --tags common
 
-docker: ## Run only the Docker installation role
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) --tags docker
+docker: collections ## Run only the Docker installation role
+	ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/install.yml --tags docker
 
-matrix: ## Run only the Matrix stack deployment role
-	ansible-playbook -i $(INVENTORY) $(PLAYBOOK) --tags matrix
+matrix: collections ## Re-run only the Matrix stack role
+	ansible-playbook -i $(INVENTORY) $(ANSIBLE_DIR)/deploy.yml --tags matrix
 
 ##@ Utilities
 
-ping: ## Test SSH connectivity to all hosts
-	ansible -i $(INVENTORY) matrix -m ping
+ping: ## Test SSH connectivity (as deploy user)
+	ansible -i $(INVENTORY) matrix -m ping -u usr
 
-facts: ## Gather and display host facts
-	ansible -i $(INVENTORY) matrix -m setup
+facts: ## Gather and display host facts (as deploy user)
+	ansible -i $(INVENTORY) matrix -m setup -u usr
 
-lint: ## Lint the Ansible playbook (requires ansible-lint)
-	ansible-lint $(PLAYBOOK)
+lint: ## Lint the Ansible playbooks (requires ansible-lint)
+	ansible-lint $(ANSIBLE_DIR)/install.yml $(ANSIBLE_DIR)/deploy.yml

@@ -1,4 +1,12 @@
 ---
+- name: Ensure apt lists directory exists (required on some minimal cloud images)
+  ansible.builtin.file:
+    path: /var/lib/apt/lists
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Update and upgrade all packages
   ansible.builtin.apt:
     update_cache: true

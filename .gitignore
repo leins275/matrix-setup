@@ -2,8 +2,9 @@
 matrix/
 !ansible/roles/matrix
 
-# vars.yml contains secrets — never commit with real values filled in
+# vars.yml and inventory.ini contain secrets — never commit with real values filled in
 ansible/vars.yml
+ansible/inventory.ini
 
 # Ansible retry files
 *.retry

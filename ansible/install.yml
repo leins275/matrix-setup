@@ -1,0 +1,16 @@
+---
+# Run as root on the fresh server.
+# Installs system packages, creates the deploy user, hardens SSH, installs Docker.
+# After this playbook completes, root login will be disabled.
+- name: Bootstrap server (run as root)
+  hosts: matrix
+  remote_user: root
+  become: true
+  vars_files:
+    - vars.yml
+
+  roles:
+    - role: common
+      tags: [common, hardening]
+    - role: docker
+      tags: [docker]

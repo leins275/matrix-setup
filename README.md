@@ -10,7 +10,7 @@ A fully automated, reproducible deployment of a **Matrix Synapse** homeserver wi
 - [Synapse Admin](https://github.com/Awesome-Technologies/synapse-admin) — web admin UI
 - [nginx](https://nginx.org/) + [Certbot](https://certbot.eff.org/) — reverse proxy + automatic SSL
 
-After completing the two manual steps (server creation and DNS), run `make run` and the playbook handles everything else: system hardening, Docker installation, all config generation, TLS certificate issuance, stack startup, and Matrix admin user creation.
+After completing the two manual steps (server creation and DNS), run `make install` then `make deploy` — two commands, two minutes apart, and you have a fully working Matrix server.
 
 ---
 
@@ -176,14 +176,20 @@ openssl rand -hex 32   # → livekit_secret
 
 **6a. Edit the inventory**
 
-Open `ansible/inventory.ini` and replace `YOUR_SERVER_IP` with your server's IP address:
+Copy the example inventory and fill in your server's IP:
+
+```bash
+cp ansible/inventory.ini.example ansible/inventory.ini
+```
+
+Then edit `ansible/inventory.ini`:
 
 ```ini
 [matrix]
-server ansible_host=1.2.3.4 ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_ed25519
+server ansible_host=1.2.3.4 ansible_ssh_private_key_file=~/.ssh/id_ed25519
 ```
 
-> Use `ansible_user=root` for the initial run. The playbook will create the `usr` account and harden SSH. Subsequent runs can use `ansible_user=usr`.
+> `ansible/inventory.ini` is in `.gitignore` — your server IP will never be committed.
 
 **6b. Fill in `ansible/vars.yml`**
 
@@ -211,29 +217,42 @@ letsencrypt_email: "you@example.com"
 
 ---
 
-### Step 7: Run the Playbook
+### Step 7: Run the Playbooks
+
+The deployment is split into two runs with different SSH users.
+
+**Run 1 — bootstrap as root** (system hardening + Docker):
 
 ```bash
-make run       # installs Ansible collections and deploys everything
+make install
 ```
 
-**What Ansible does, in order:**
+This connects as `root`, hardens the server, creates the `usr` deploy account, and installs Docker. At the end, root SSH login is disabled.
 
-| Phase | Role | Actions |
+**Run 2 — deploy as `usr`** (Matrix stack + TLS):
+
+```bash
+make deploy
+```
+
+This connects as `usr`, writes all config files, starts the Docker stack, issues Let's Encrypt certificates, and creates the Matrix admin user.
+
+**What each playbook does:**
+
+| Command | Connects as | Actions |
 |---|---|---|
-| System hardening | `common` | `apt` upgrade, create `usr` user + sudo, harden SSH (disable root + password login), configure UFW with all required ports, enable fail2ban and unattended-upgrades |
-| Docker | `docker` | Install Docker Engine + Compose plugin from official repo, add `usr` to `docker` group |
-| Matrix stack | `matrix` | Write all config files, generate Synapse config, deploy nginx bootstrap config, start the stack, issue Let's Encrypt TLS certificates via certbot for all 3 domains, switch to full nginx config, wait for Synapse health, create admin user |
+| `make install` | `root` | `apt` upgrade, create `usr` user + sudo, harden SSH (disable root + password login), configure UFW, enable fail2ban and unattended-upgrades, install Docker Engine + Compose plugin |
+| `make deploy` | `usr` | Write all config files, generate Synapse config, start the stack, issue TLS certificates for all 3 domains, switch nginx to full config, wait for Synapse health, create admin user |
 
 > **Total runtime:** approximately 5–10 minutes on a fresh server.
 
-To run only a specific phase:
+To re-run only a specific role:
 
 ```bash
-make hardening   # system hardening only
-make docker      # Docker install only
-make matrix      # Matrix stack only
-make check       # dry run (no changes made)
+make hardening   # system hardening only (as root)
+make docker      # Docker install only (as root)
+make matrix      # Matrix stack only (as usr)
+make check       # dry run of the full playbook (no changes made)
 ```
 
 ---
@@ -347,10 +366,10 @@ Open registration is **disabled** by default — users cannot sign up on their o
 
 **Enabling open registration**
 
-To allow anyone to create an account, set `enable_registration: true` in `ansible/vars.yml` and re-run the playbook:
+To allow anyone to create an account, set `enable_registration: true` in `ansible/vars.yml` and re-run the deploy playbook:
 
 ```bash
-make run
+make deploy
 ```
 
 Synapse will restart with registration open. Users can then sign up directly from any Matrix client by pointing it at your homeserver.
@@ -433,4 +452,4 @@ The playbook disables password authentication and root login. Ensure your SSH pu
 
 ### Ansible fails with "collection not found"
 
-Run `make run` — it installs the required Ansible collections automatically before deploying.
+Run `make collections` — it installs the required Ansible collections. Both `make install` and `make deploy` do this automatically.
