@@ -1,0 +1,7 @@
+---
+- name: Reload nginx
+  ansible.builtin.command:
+    cmd: docker compose exec nginx nginx -s reload
+  args:
+    chdir: "{{ matrix_project_dir }}"
+  become_user: "{{ deploy_user }}"

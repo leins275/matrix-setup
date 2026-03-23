@@ -8,9 +8,9 @@ A fully automated, reproducible deployment of a **Matrix Synapse** homeserver wi
 - [LiveKit](https://livekit.io/) — modern SFU for group video (Element X / Element Call)
 - [lk-jwt-service](https://github.com/element-hq/lk-jwt-service) — JWT auth for LiveKit
 - [Synapse Admin](https://github.com/Awesome-Technologies/synapse-admin) — web admin UI
-- [Nginx Proxy Manager](https://nginxproxymanager.com/) — reverse proxy + automatic SSL
+- [nginx](https://nginx.org/) + [Certbot](https://certbot.eff.org/) — reverse proxy + automatic SSL
 
-After completing the two manual steps (server creation and DNS), run `make install && make run` and the playbook handles everything else: system hardening, Docker installation, all config generation, stack startup, Matrix admin user creation, and full Nginx Proxy Manager configuration including SSL certificates.
+After completing the two manual steps (server creation and DNS), run `make run` and the playbook handles everything else: system hardening, Docker installation, all config generation, TLS certificate issuance, stack startup, and Matrix admin user creation.
 
 ---
 
@@ -41,12 +41,11 @@ After completing the two manual steps (server creation and DNS), run `make insta
                     Internet
                        │
               ┌────────▼────────┐
-              │  Nginx Proxy    │  :80 / :443  (auto SSL via Let's Encrypt)
-              │  Manager        │  :81  (admin UI)
+              │     nginx       │  :80 / :443  (auto SSL via Let's Encrypt)
               └──┬──────────┬───┘
                  │          │
         ┌────────▼──┐  ┌────▼────────────┐
-        │  Synapse  │  │  lk-jwt-service │ :8081
+        │  Synapse  │  │  lk-jwt-service │ :8081 (internal)
         │  :8008    │  └────────┬────────┘
         └─────┬─────┘           │
               │           ┌─────▼────────┐
@@ -59,7 +58,7 @@ After completing the two manual steps (server creation and DNS), run `make insta
         │  STUN/TURN│ UDP 49152-65535
         └───────────┘
         ┌───────────┐
-        │  Synapse  │ :8080
+        │  Synapse  │ :80 (internal)
         │  Admin    │
         └───────────┘
 ```
@@ -101,14 +100,12 @@ Many providers have a network-level firewall separate from UFW. If yours does, o
 |---|---|---|
 | 22 | TCP | SSH |
 | 80, 443 | TCP | HTTP / HTTPS |
-| 81 | TCP | Nginx Proxy Manager admin |
-| 8080 | TCP | Synapse Admin UI |
 | 3478, 5349 | TCP + UDP | Coturn STUN/TURN |
 | 7881 | TCP | LiveKit WebRTC |
 | 49152–65535 | UDP | Coturn relay range |
 | 50000–50200 | UDP | LiveKit media range |
 
-> Ports 7880 (LiveKit HTTP), 8008 (Synapse), and 8081 (lk-jwt-service) are internal — accessed only via Nginx Proxy Manager from within the host.
+> Ports 7880 (LiveKit HTTP), 8008 (Synapse), and 8081 (lk-jwt-service) are internal — accessed only through nginx from within the host.
 
 Test that you can log in:
 
@@ -207,9 +204,6 @@ livekit_key_id: "matrix-key"
 matrix_admin_user: "admin"
 matrix_admin_password: "strong_password"
 
-npm_admin_email: "you@example.com"
-npm_admin_password: "strong_password"
-
 letsencrypt_email: "you@example.com"
 ```
 
@@ -229,7 +223,7 @@ make run       # installs Ansible collections and deploys everything
 |---|---|---|
 | System hardening | `common` | `apt` upgrade, create `usr` user + sudo, harden SSH (disable root + password login), configure UFW with all required ports, enable fail2ban and unattended-upgrades |
 | Docker | `docker` | Install Docker Engine + Compose plugin from official repo, add `usr` to `docker` group |
-| Matrix stack | `matrix` | Write all config files, generate Synapse config, pull and start all containers, wait for Synapse health, create admin user, configure Nginx Proxy Manager via API (set credentials, create 3 proxy hosts with Let's Encrypt SSL, add `.well-known` endpoints) |
+| Matrix stack | `matrix` | Write all config files, generate Synapse config, deploy nginx bootstrap config, start the stack, issue Let's Encrypt TLS certificates via certbot for all 3 domains, switch to full nginx config, wait for Synapse health, create admin user |
 
 > **Total runtime:** approximately 5–10 minutes on a fresh server.
 
@@ -271,11 +265,7 @@ ssh usr@YOUR_SERVER_IP "docker logs matrix-livekit-1 2>&1 | tail -20"
 
 **Synapse Admin UI:**
 
-Access at `https://matrix.example.com/admin` — log in with your Matrix admin credentials and homeserver URL `https://matrix.example.com`.
-
-**Nginx Proxy Manager:**
-
-Access at `https://matrix.example.com/npm` — log in with the `npm_admin_email` and `npm_admin_password` you set in `vars.yml`.
+Access at `https://matrix.example.com/admin/` — log in with your Matrix admin credentials and homeserver URL `https://matrix.example.com`.
 
 ---
 
@@ -290,11 +280,10 @@ Access at `https://matrix.example.com/npm` — log in with the `npm_admin_email`
 | 7881 | TCP | LiveKit WebRTC | Yes |
 | 49152–65535 | UDP | Coturn relay range | Yes |
 | 50000–50200 | UDP | LiveKit media range | Yes |
-| 7880 | TCP | LiveKit HTTP (internal) | No — proxied via NPM |
-| 8008 | TCP | Synapse (internal) | No — proxied via NPM |
-| 8081 | TCP | lk-jwt-service (internal) | No — proxied via NPM |
-| 81 | TCP | NPM admin UI (internal) | No — served at `/npm` subpath |
-| 80 (container) | TCP | Synapse Admin (internal) | No — served at `/admin` subpath |
+| 7880 | TCP | LiveKit HTTP (internal) | No — proxied via nginx |
+| 8008 | TCP | Synapse (internal) | No — proxied via nginx |
+| 8081 | TCP | lk-jwt-service (internal) | No — proxied via nginx |
+| 80 (container) | TCP | Synapse Admin (internal) | No — served at `/admin/` subpath |
 | 5432 | TCP | PostgreSQL (internal) | No |
 
 ---
@@ -309,8 +298,9 @@ Access at `https://matrix.example.com/npm` — log in with the `npm_admin_email`
 ├── livekit/
 │   └── livekit.yaml
 ├── nginx/
-│   ├── data/                   # Nginx Proxy Manager runtime data
-│   └── letsencrypt/            # SSL certificates
+│   ├── nginx.conf              # nginx config (managed by Ansible)
+│   ├── letsencrypt/            # SSL certificates (managed by certbot)
+│   └── certbot-webroot/        # ACME challenge files
 ├── postgresdata/               # PostgreSQL data volume
 ├── synapse-data/
 │   ├── homeserver.yaml
@@ -409,14 +399,13 @@ DNS propagation is not complete yet. Verify from the command line:
 nslookup matrix.example.com
 ```
 
-Wait a few minutes and retry. Ansible will also fail at the NPM SSL step if DNS is not ready.
+Wait a few minutes and retry. Ansible will also fail at the certbot certificate step if DNS is not ready.
 
-### NPM proxy host creation fails (SSL certificate error)
+### Certificate issuance fails (SSL certificate error)
 
 Let's Encrypt requires the domain to be publicly reachable on port 80. Ensure:
 - DNS A records are fully propagated
 - Port 80 is open in both UFW and any cloud firewall
-- No existing conflicting proxy hosts in NPM
 
 Re-run only the matrix role after fixing: `make matrix`
 
@@ -426,7 +415,7 @@ Element found the JWT service but cannot reach LiveKit. Check:
 
 1. Cloud firewall allows UDP 50000–50200 and TCP 7881
 2. LiveKit container is healthy: `docker logs matrix-livekit-1 2>&1 | grep -i "started\|error"`
-3. The `livekit.example.com` proxy host in NPM has **WebSocket support** enabled (set automatically by Ansible)
+3. The `livekit.example.com` nginx upstream is reachable (check `docker compose logs nginx`)
 
 ### "MISSING_MATRIX_RTC_TRANSPORT" in Element
 
@@ -436,7 +425,7 @@ The `.well-known/matrix/client` endpoint is not returning valid JSON. Verify:
 curl -s https://matrix.example.com/.well-known/matrix/client | python3 -m json.tool
 ```
 
-If it returns an error, the custom Nginx config in the Synapse proxy host may not have been applied. Re-run `make matrix` to re-apply.
+If it returns an error, the nginx config may not have been applied correctly. Check nginx logs with `docker compose logs nginx`, then re-run `make matrix` to re-apply.
 
 ### SSH locked out after first Ansible run
 
@@ -444,4 +433,4 @@ The playbook disables password authentication and root login. Ensure your SSH pu
 
 ### Ansible fails with "collection not found"
 
-Run `make install` before `make run` to install the required Ansible collections.
+Run `make run` — it installs the required Ansible collections automatically before deploying.

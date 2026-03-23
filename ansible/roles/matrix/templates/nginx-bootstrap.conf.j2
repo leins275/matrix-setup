@@ -1,0 +1,23 @@
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    # Minimal config used only during initial certificate issuance.
+    # nginx is reloaded with the full config after certbot succeeds.
+
+    server {
+        listen 80;
+        server_name {{ matrix_domain }} {{ livekit_domain }} {{ call_auth_domain }};
+
+        location /.well-known/acme-challenge/ {
+            root /var/www/certbot;
+        }
+
+        location / {
+            return 200 'ok';
+        }
+    }
+}
