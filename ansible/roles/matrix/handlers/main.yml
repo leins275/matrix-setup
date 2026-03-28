@@ -9,8 +9,10 @@
   become_user: "{{ deploy_user }}"
 
 - name: Reload nginx
-  ansible.builtin.command:
-    cmd: docker compose exec nginx nginx -s reload
-  args:
-    chdir: "{{ matrix_project_dir }}"
+  community.docker.docker_compose_v2:
+    project_src: "{{ matrix_project_dir }}"
+    services:
+      - nginx
+    state: restarted
+    docker_host: "unix:///var/run/docker.sock"
   become_user: "{{ deploy_user }}"

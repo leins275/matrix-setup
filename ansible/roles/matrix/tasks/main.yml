@@ -251,10 +251,12 @@
 - name: Flush handlers to reload nginx immediately
   ansible.builtin.meta: flush_handlers
 
-- name: Reload nginx unconditionally (ensures activation even on idempotent re-runs)
-  ansible.builtin.command:
-    cmd: docker compose exec nginx nginx -s reload
-  args:
-    chdir: "{{ matrix_project_dir }}"
+- name: Restart nginx to apply full config (reload cannot bind new ports)
+  community.docker.docker_compose_v2:
+    project_src: "{{ matrix_project_dir }}"
+    services:
+      - nginx
+    state: restarted
+    docker_host: "unix:///var/run/docker.sock"
   become_user: "{{ deploy_user }}"
   changed_when: false
