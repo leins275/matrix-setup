@@ -33,10 +33,13 @@ signing_key_path: "/data/{{ matrix_domain }}.signing.key"
 
 report_stats: true
 
-enable_registration: {{ enable_registration | lower }}
-{% if enable_registration %}
-enable_registration_without_verification: true
-{% endif %}
+# MAS takes over all authentication. Synapse must NOT have enable_registration: true
+# when matrix_authentication_service is enabled — MAS provisions users via admin API.
+
+matrix_authentication_service:
+  enabled: true
+  endpoint: "http://mas:8080/"
+  secret: "{{ mas_synapse_secret }}"
 
 trusted_key_servers:
   - server_name: "matrix.org"

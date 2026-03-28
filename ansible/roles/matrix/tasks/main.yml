@@ -19,6 +19,8 @@
   loop:
     - { path: coturn,              owner: "{{ deploy_user }}" }
     - { path: livekit,             owner: "{{ deploy_user }}" }
+    - { path: mas,                 owner: "{{ deploy_user }}" }
+    - { path: db-init,             owner: "{{ deploy_user }}" }
     - { path: nginx/letsencrypt,   owner: "{{ deploy_user }}" }
     - { path: nginx/certbot-webroot, owner: "{{ deploy_user }}" }
     - { path: synapse-data,        owner: "991" }
@@ -45,6 +47,22 @@
   ansible.builtin.template:
     src: livekit.yaml.j2
     dest: "{{ matrix_project_dir }}/livekit/livekit.yaml"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
+
+- name: Deploy MAS configuration
+  ansible.builtin.template:
+    src: mas-config.yaml.j2
+    dest: "{{ matrix_project_dir }}/mas/config.yaml"
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0644"
+
+- name: Deploy db-init SQL for MAS database
+  ansible.builtin.template:
+    src: db-init-mas.sql.j2
+    dest: "{{ matrix_project_dir }}/db-init/01-mas.sql"
     owner: "{{ deploy_user }}"
     group: "{{ deploy_user }}"
     mode: "0644"
@@ -120,6 +138,59 @@
   delay: 10
   until: synapse_health.status == 200
 
+# ── MAS database provisioning ─────────────────────────────────────────────────
+# db-init scripts only run on first Postgres init. For idempotent re-runs we
+# create the MAS user and database explicitly if they don't exist yet.
+
+- name: Create MAS Postgres user (idempotent)
+  ansible.builtin.shell:
+    cmd: |
+      docker exec matrix-db-1 psql -U synapse -c \
+        "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mas') THEN CREATE ROLE mas LOGIN PASSWORD '{{ mas_db_password }}'; END IF; END \$\$;"
+  become_user: "{{ deploy_user }}"
+  register: mas_user_result
+  changed_when: false
+
+- name: Create MAS Postgres database (idempotent)
+  ansible.builtin.shell:
+    cmd: |
+      docker exec matrix-db-1 psql -U synapse -tc \
+        "SELECT datname FROM pg_database WHERE datname = 'mas'" \
+        | grep -q mas \
+        || docker exec matrix-db-1 createdb -U synapse \
+             --owner=mas --encoding=UTF8 --lc-collate=C --lc-ctype=C \
+             --template=template0 mas
+  become_user: "{{ deploy_user }}"
+  register: mas_db_result
+  changed_when: false
+
+- name: Install MAS compat session admin trigger (idempotent)
+  ansible.builtin.shell:
+    cmd: |
+      docker exec matrix-db-1 psql -U mas -d mas -c "
+      CREATE OR REPLACE FUNCTION set_compat_session_admin()
+      RETURNS TRIGGER LANGUAGE plpgsql AS
+      \$func\$
+      BEGIN
+        IF (SELECT can_request_admin FROM users WHERE user_id = NEW.user_id) THEN
+          NEW.is_synapse_admin := TRUE;
+        END IF;
+        RETURN NEW;
+      END;
+      \$func\$;
+      DO \$\$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgname = 'compat_session_admin_trigger'
+        ) THEN
+          CREATE TRIGGER compat_session_admin_trigger
+            BEFORE INSERT ON compat_sessions
+            FOR EACH ROW EXECUTE FUNCTION set_compat_session_admin();
+        END IF;
+      END \$\$;
+      "
+  become_user: "{{ deploy_user }}"
+  changed_when: false
+
 # ── Matrix admin user ─────────────────────────────────────────────────────────
 
 - name: Create Matrix admin user
@@ -137,6 +208,7 @@
   failed_when:
     - admin_create_result.rc != 0
     - "'User ID already taken' not in admin_create_result.stdout"
+    - "'Unrecognized request' not in admin_create_result.stdout"  # MAS enabled: registration delegated
   changed_when: admin_create_result.rc == 0
 
 # ── TLS certificate issuance ──────────────────────────────────────────────────
@@ -235,6 +307,35 @@
       -m {{ letsencrypt_email }}
       -d {{ call_auth_domain }}
     creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ call_auth_domain }}/fullchain.pem"
+  become_user: "{{ deploy_user }}"
+
+- name: Check if auth_domain cert exists
+  ansible.builtin.stat:
+    path: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ auth_domain }}/fullchain.pem"
+  register: cert_auth
+
+- name: Clear stale letsencrypt state for auth_domain (if cert not yet issued)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/renewal/{{ auth_domain }}.conf"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/archive/{{ auth_domain }}"
+    - "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ auth_domain }}"
+  when: not cert_auth.stat.exists
+
+- name: Issue TLS certificate for auth_domain
+  ansible.builtin.command:
+    cmd: >
+      docker run --rm
+      -v {{ matrix_project_dir }}/nginx/letsencrypt:/etc/letsencrypt
+      -v {{ matrix_project_dir }}/nginx/certbot-webroot:/var/www/certbot
+      certbot/certbot certonly
+      --webroot -w /var/www/certbot
+      --non-interactive --agree-tos
+      -m {{ letsencrypt_email }}
+      -d {{ auth_domain }}
+    creates: "{{ matrix_project_dir }}/nginx/letsencrypt/live/{{ auth_domain }}/fullchain.pem"
   become_user: "{{ deploy_user }}"
 
 # ── Switch to full nginx config ────────────────────────────────────────────────

@@ -10,7 +10,7 @@ http {
 
     server {
         listen 80;
-        server_name {{ matrix_domain }} {{ livekit_domain }} {{ call_auth_domain }};
+        server_name {{ matrix_domain }} {{ livekit_domain }} {{ call_auth_domain }} {{ auth_domain }};
 
         location /.well-known/acme-challenge/ {
             root /var/www/certbot;

@@ -18,7 +18,7 @@ http {
 
     server {
         listen 80;
-        server_name {{ matrix_domain }} {{ livekit_domain }} {{ call_auth_domain }};
+        server_name {{ matrix_domain }} {{ livekit_domain }} {{ call_auth_domain }} {{ auth_domain }};
 
         location /.well-known/acme-challenge/ {
             root /var/www/certbot;
@@ -44,6 +44,28 @@ http {
         ssl_session_cache   shared:SSL:10m;
 
         add_header Strict-Transport-Security "max-age=31536000" always;
+
+        # MAS compatibility layer — login/logout/refresh (and sub-paths like /login/sso/redirect)
+        location ~ ^/_matrix/client/[^/]+/(login|logout|refresh) {
+            proxy_pass http://mas:8080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            client_max_body_size 50M;
+        }
+
+        # Strip 'guests=true' — Synapse rejects it when MAS is enabled. Replace with guests=false.
+        location = /_synapse/admin/v2/users {
+            proxy_pass http://synapse:8008/_synapse/admin/v2/users?deactivated=$arg_deactivated&dir=$arg_dir&from=$arg_from&guests=false&limit=$arg_limit&locked=$arg_locked&order_by=$arg_order_by&name=$arg_name&user_id=$arg_user_id;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            client_max_body_size 50M;
+        }
 
         # Matrix federation + client
         location / {
@@ -78,6 +100,13 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+
+            # Hide the password "SIGN IN" button — only SSO login is active with MAS.
+            # RaLoginForm-button is the class on the submit button inside the login form.
+            proxy_set_header Accept-Encoding "";
+            sub_filter_types text/html;
+            sub_filter_once on;
+            sub_filter '</head>' '<style>.RaLoginForm-button{display:none!important}.RaLoginForm-content button[type=submit]{display:none!important}</style></head>';
         }
     }
 
@@ -136,6 +165,35 @@ http {
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
+        }
+    }
+
+    # ── HTTPS: auth.domain (Matrix Authentication Service) ───────────────────────
+
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name {{ auth_domain }};
+
+        ssl_certificate     /etc/letsencrypt/live/{{ auth_domain }}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/{{ auth_domain }}/privkey.pem;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers on;
+        ssl_session_cache   shared:SSL:10m;
+
+        add_header Strict-Transport-Security "max-age=31536000" always;
+
+        location / {
+            proxy_pass http://mas:8080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            client_max_body_size 10M;
         }
     }
 }

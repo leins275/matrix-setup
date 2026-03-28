@@ -1,0 +1,56 @@
+http:
+  public_base: https://{{ auth_domain }}/
+  listeners:
+    - name: web
+      resources:
+        - name: discovery
+        - name: human
+        - name: oauth
+        - name: compat
+        - name: graphql
+          playground: false
+        - name: assets
+          path: /usr/local/share/mas-cli/assets/
+      binds:
+        - address: "[::]:8080"
+
+database:
+  host: db
+  port: 5432
+  username: mas
+  password: {{ mas_db_password }}
+  database: mas
+  ssl_mode: disable
+
+matrix:
+  kind: synapse
+  homeserver: {{ matrix_domain }}
+  endpoint: "http://synapse:8008"
+  secret: "{{ mas_synapse_secret }}"
+
+secrets:
+  encryption: {{ mas_encryption_secret }}
+  keys:
+    - key: |
+{{ mas_signing_key | indent(8, first=true) }}
+
+passwords:
+  enabled: true
+  schemes:
+    - version: 1
+      algorithm: bcrypt
+
+account:
+  password_registration_enabled: {{ enable_registration | lower }}
+  email_change_allowed: true
+  displayname_change_allowed: true
+  password_change_allowed: true
+
+email:
+  from: '"Matrix" <{{ smtp_username }}>'
+  transport: smtp
+  hostname: smtp.gmail.com
+  port: 587
+  mode: starttls
+  username: "{{ smtp_username }}"
+  password: "{{ smtp_password }}"

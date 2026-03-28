@@ -1,0 +1,9 @@
+-- Runs only on first Postgres container init (docker-entrypoint-initdb.d).
+-- For idempotent re-runs, the Ansible task creates the user/db explicitly.
+CREATE ROLE mas LOGIN PASSWORD '{{ mas_db_password }}';
+CREATE DATABASE mas
+  OWNER mas
+  ENCODING 'UTF8'
+  LC_COLLATE 'C'
+  LC_CTYPE 'C'
+  TEMPLATE template0;

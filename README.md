@@ -3,6 +3,7 @@
 A fully automated, reproducible deployment of a **Matrix Synapse** homeserver with:
 
 - [Matrix Synapse](https://github.com/element-hq/synapse) — homeserver
+- [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service) — OIDC/OAuth2 auth for Element X
 - [PostgreSQL 15](https://www.postgresql.org/) — database
 - [Coturn](https://github.com/coturn/coturn) — STUN/TURN for legacy 1:1 calls
 - [LiveKit](https://livekit.io/) — modern SFU for group video (Element X / Element Call)
@@ -31,7 +32,9 @@ After completing the two manual steps (server creation and DNS), run `make insta
 6. [Port Reference](#port-reference)
 7. [Directory Layout on Server](#directory-layout-on-server)
 8. [Useful Commands](#useful-commands)
-9. [Troubleshooting](#troubleshooting)
+9. [User Management](#user-management)
+10. [Matrix Authentication Service (MAS)](#matrix-authentication-service-mas)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -42,16 +45,20 @@ After completing the two manual steps (server creation and DNS), run `make insta
                        │
               ┌────────▼────────┐
               │     nginx       │  :80 / :443  (auto SSL via Let's Encrypt)
-              └──┬──────────┬───┘
-                 │          │
-        ┌────────▼──┐  ┌────▼────────────┐
+              └──┬───────────┬──┘
+                 │           │
+        ┌────────▼──┐  ┌─────▼───────────┐
         │  Synapse  │  │  lk-jwt-service │ :8081 (internal)
         │  :8008    │  └────────┬────────┘
         └─────┬─────┘           │
               │           ┌─────▼────────┐
         ┌─────▼─────┐     │   LiveKit    │ :7880/:7881
-        │ PostgreSQL│     │   SFU        │ UDP 50000-50200
-        │ :5432     │     └──────────────┘
+        │    MAS    │     │   SFU        │ UDP 50000-50200
+        │  :8080    │     └──────────────┘
+        └─────┬─────┘
+        ┌─────▼─────┐
+        │ PostgreSQL│
+        │ :5432     │
         └───────────┘
         ┌───────────┐
         │  Coturn   │ :3478/:5349 UDP+TCP
@@ -117,13 +124,14 @@ ssh root@YOUR_SERVER_IP
 
 ### Step 2: Configure DNS Records
 
-Log into your domain registrar and add three **A records**, replacing `YOUR_SERVER_IP` with your server's public IP:
+Log into your domain registrar and add four **A records**, replacing `YOUR_SERVER_IP` with your server's public IP:
 
 | Type | Name | Value | TTL |
 |---|---|---|---|
 | A | `matrix` | `YOUR_SERVER_IP` | 3600 |
 | A | `livekit` | `YOUR_SERVER_IP` | 3600 |
 | A | `call-auth` | `YOUR_SERVER_IP` | 3600 |
+| A | `auth` | `YOUR_SERVER_IP` | 3600 |
 
 Verify propagation before proceeding (may take a few minutes):
 
@@ -131,9 +139,10 @@ Verify propagation before proceeding (may take a few minutes):
 ping -c 2 matrix.example.com
 ping -c 2 livekit.example.com
 ping -c 2 call-auth.example.com
+ping -c 2 auth.example.com
 ```
 
-All three must resolve to your server's IP.
+All four must resolve to your server's IP.
 
 ---
 
@@ -165,12 +174,14 @@ cd matrix-setup
 Run these commands and save the output for the next step:
 
 ```bash
-openssl rand -hex 16   # → db_password
+openssl rand -hex 16   # → db_password, mas_db_password
 openssl rand -hex 24   # → coturn_secret
-openssl rand -hex 32   # → livekit_secret
-openssl rand -hex 32   # → registration_shared_secret
-openssl rand -hex 32   # → macaroon_secret_key
-openssl rand -hex 32   # → form_secret
+openssl rand -hex 32   # → livekit_secret, registration_shared_secret,
+                       #   macaroon_secret_key, form_secret,
+                       #   mas_encryption_secret, mas_synapse_secret
+
+# MAS signing key (RSA-2048 PKCS#8)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
 ```
 
 ---
@@ -202,6 +213,7 @@ Open `ansible/vars.yml` and fill in every value:
 matrix_domain: "matrix.example.com"
 livekit_domain: "livekit.example.com"
 call_auth_domain: "call-auth.example.com"
+auth_domain: "auth.example.com"
 
 server_public_ip: "1.2.3.4"
 
@@ -217,6 +229,19 @@ matrix_admin_user: "admin"
 matrix_admin_password: "strong_password"
 
 letsencrypt_email: "you@example.com"
+
+# MAS secrets — generate with the commands in Step 5
+mas_encryption_secret: "your_hex_32_value"
+mas_synapse_secret: "your_hex_32_value"
+mas_db_password: "your_hex_16_value"
+mas_signing_key: |
+  -----BEGIN PRIVATE KEY-----
+  <paste RSA-2048 PKCS#8 key here>
+  -----END PRIVATE KEY-----
+
+# Gmail SMTP for MAS verification emails
+smtp_username: "you@gmail.com"
+smtp_password: "your_16_char_app_password"
 ```
 
 > **Security note:** `ansible/vars.yml` is in `.gitignore` — your secrets will never be committed.
@@ -248,7 +273,7 @@ This connects as `usr`, writes all config files, starts the Docker stack, issues
 | Command | Connects as | Actions |
 |---|---|---|
 | `make install` | `root` | `apt` upgrade, create `usr` user + sudo, harden SSH (disable root + password login), configure UFW, enable fail2ban and unattended-upgrades, install Docker Engine + Compose plugin |
-| `make deploy` | `usr` | Write all config files, generate Synapse config, start the stack, issue TLS certificates for all 3 domains, switch nginx to full config, wait for Synapse health, create admin user |
+| `make deploy` | `usr` | Write all config files, generate Synapse config, start the stack, issue TLS certificates for all 4 domains, switch nginx to full config, wait for Synapse health, create admin user |
 
 > **Total runtime:** approximately 5–10 minutes on a fresh server.
 
@@ -273,6 +298,9 @@ ssh usr@YOUR_SERVER_IP "docker compose -f ~/matrix/docker-compose.yml ps"
 
 # Synapse federation endpoint
 curl https://matrix.example.com/_matrix/client/versions
+
+# MAS OIDC discovery endpoint
+curl https://auth.example.com/.well-known/openid-configuration
 
 # well-known discovery (used by Element X for LiveKit)
 curl https://matrix.example.com/.well-known/matrix/client
@@ -401,6 +429,64 @@ docker exec -it matrix-synapse-1 register_new_matrix_user \
 **Option 2 — Synapse Admin UI:**
 
 Open `https://matrix.example.com/admin`, log in with your admin Matrix account and homeserver URL `https://matrix.example.com`, then go to **Users → Create user**.
+
+---
+
+## Matrix Authentication Service (MAS)
+
+MAS is an OIDC/OAuth2 authorization server that handles all authentication for Element X and other native OIDC clients. Synapse delegates login, logout, and token refresh to it — users never authenticate directly against Synapse.
+
+The MAS frontend is served at `https://auth.example.com`.
+
+### How registration works with MAS
+
+When `enable_registration: true` is set, users who open `https://auth.example.com` (or are redirected there by Element X) go through the following flow:
+
+1. Enter email address and desired password
+2. MAS sends a **6-digit verification code** to the email address
+3. User enters the code to confirm their email
+4. Account is created and the user is logged in
+
+This requires a working outbound email setup (see below).
+
+### Email configuration (Gmail SMTP)
+
+MAS sends transactional emails (verification codes, password resets) via SMTP. The configuration lives in `ansible/vars.yml`:
+
+```yaml
+smtp_username: "you@gmail.com"
+smtp_password: "your_16_char_app_password"
+```
+
+These are rendered into `mas/config.yaml` on the server as:
+
+```yaml
+email:
+  from: '"Matrix" <you@gmail.com>'
+  transport: smtp
+  hostname: smtp.gmail.com
+  port: 587
+  mode: starttls
+  username: "you@gmail.com"
+  password: "your_16_char_app_password"
+```
+
+**Generating a Gmail App Password:**
+
+1. Enable 2-Step Verification on the Google account if not already active
+2. Go to https://myaccount.google.com/apppasswords
+3. Create a new app password (e.g. name it "Matrix MAS")
+4. Copy the 16-character code into `smtp_password` in `vars.yml`
+
+> Gmail App Passwords are specific to one app and can be revoked independently from your main account password.
+
+**Applying email config changes:**
+
+```bash
+make deploy
+```
+
+This regenerates `mas/config.yaml` and restarts the MAS container.
 
 ---
 
