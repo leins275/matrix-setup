@@ -40,9 +40,13 @@ services:
   lk-jwt-service:
     image: ghcr.io/element-hq/lk-jwt-service:latest
     restart: always
+    extra_hosts:
+      - "host-gateway:host-gateway"
     environment:
       - LIVEKIT_JWT_BIND=:8081
-      - LIVEKIT_URL=wss://{{ livekit_domain }}
+      # Use the host gateway to reach LiveKit directly, bypassing nginx.
+      # Clients receive wss://{{ livekit_domain }} via .well-known independently.
+      - LIVEKIT_URL=ws://host-gateway:7880
       - LIVEKIT_KEY={{ livekit_key_id }}
       - LIVEKIT_SECRET={{ livekit_secret }}
       - LIVEKIT_FULL_ACCESS_HOMESERVERS={{ matrix_domain }}
