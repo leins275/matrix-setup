@@ -137,6 +137,12 @@
     proto: udp
     comment: LiveKit media UDP range
 
+- name: Allow Docker compose bridge network to reach host services
+  community.general.ufw:
+    rule: allow
+    src: "172.22.0.0/16"
+    comment: Docker compose bridge network (nginx/lk-jwt-service to host-mode services)
+
 - name: Enable UFW
   community.general.ufw:
     state: enabled

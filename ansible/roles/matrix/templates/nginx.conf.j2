@@ -98,7 +98,9 @@ http {
         add_header Strict-Transport-Security "max-age=31536000" always;
 
         location / {
-            proxy_pass http://{{ server_public_ip }}:7880;
+            # LiveKit runs network_mode: host. 172.22.0.1 is the fixed compose
+            # bridge gateway — the host as seen from bridge-networked containers.
+            proxy_pass http://172.22.0.1:7880;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

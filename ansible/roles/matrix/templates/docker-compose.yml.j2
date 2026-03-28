@@ -22,6 +22,9 @@ services:
     environment:
       - SYNAPSE_CONFIG_PATH=/data/homeserver.yaml
 
+  # Coturn needs network_mode: host because it must bind thousands of UDP relay
+  # ports (49152-65535). Mapping that range via Docker iptables rules locks up
+  # the kernel — host mode is the only viable option.
   coturn:
     image: coturn/coturn:latest
     restart: always
@@ -29,6 +32,9 @@ services:
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
 
+  # LiveKit also needs network_mode: host for the same reason: WebRTC UDP media
+  # ports (50000-50200) and TCP 7881 need direct host binding. The HTTP API
+  # (port 7880) is reached by nginx and lk-jwt-service via host-gateway.
   livekit:
     image: livekit/livekit-server:latest
     command: --config /etc/livekit.yaml
@@ -40,13 +46,10 @@ services:
   lk-jwt-service:
     image: ghcr.io/element-hq/lk-jwt-service:latest
     restart: always
-    extra_hosts:
-      - "host-gateway:host-gateway"
     environment:
       - LIVEKIT_JWT_BIND=:8081
-      # Use the host gateway to reach LiveKit directly, bypassing nginx.
-      # Clients receive wss://{{ livekit_domain }} via .well-known independently.
-      - LIVEKIT_URL=ws://host-gateway:7880
+      # Public URL — returned to clients and used for internal RPC (routed via nginx)
+      - LIVEKIT_URL=https://{{ livekit_domain }}
       - LIVEKIT_KEY={{ livekit_key_id }}
       - LIVEKIT_SECRET={{ livekit_secret }}
       - LIVEKIT_FULL_ACCESS_HOMESERVERS={{ matrix_domain }}
@@ -72,3 +75,11 @@ services:
       - ./nginx/letsencrypt:/etc/letsencrypt
       - ./nginx/certbot-webroot:/var/www/certbot
     entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done"
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+          gateway: 172.22.0.1
